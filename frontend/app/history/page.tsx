@@ -33,12 +33,14 @@ export default function HistoryPage() {
     const { user, isLoading: authLoading } = useAuth();
     const router = useRouter();
     const [entries, setEntries] = useState<HistoryEntry[]>([]);
-    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [selectedId, setSelectedId] = useState<string | null>(null);
     const [confirmClear, setConfirmClear] = useState(false);
 
     useEffect(() => {
         if (!authLoading && user) {
-            setEntries(getHistory());
+            const h = getHistory();
+            setEntries(h);
+            if (h.length > 0) setSelectedId(h[0].id);
         }
     }, [authLoading, user]);
 
@@ -54,6 +56,8 @@ export default function HistoryPage() {
         return <LoginPage />;
     }
 
+    const selectedEntry = entries.find((e) => e.id === selectedId) ?? null;
+
     const handleClear = () => {
         if (!confirmClear) {
             setConfirmClear(true);
@@ -61,6 +65,7 @@ export default function HistoryPage() {
         }
         clearHistory();
         setEntries([]);
+        setSelectedId(null);
         setConfirmClear(false);
     };
 
@@ -68,29 +73,30 @@ export default function HistoryPage() {
         router.push(`/?q=${encodeURIComponent(query)}`);
     };
 
-    const toggleExpand = (id: string) => {
-        setExpandedId((prev) => (prev === id ? null : id));
-    };
-
     const formatDuration = (ms: number) => {
         const totalSeconds = Math.max(0, Math.round(ms / 1000));
         const minutes = Math.floor(totalSeconds / 60);
         const seconds = totalSeconds % 60;
-        if (minutes > 0) return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+        if (minutes > 0)
+            return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
         return `${seconds}s`;
     };
 
     const formatTimestamp = (ts: string) => {
         const d = new Date(ts);
-        return d.toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-        }) + " at " + d.toLocaleTimeString("en-US", {
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-        });
+        return (
+            d.toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+            }) +
+            " at " +
+            d.toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+            })
+        );
     };
 
     const relativeTime = (ts: string) => {
@@ -139,7 +145,11 @@ export default function HistoryPage() {
                 legend: {
                     position: "top" as const,
                     labels: {
-                        font: { family: "'Space Grotesk', sans-serif", size: 12, weight: 600 as const },
+                        font: {
+                            family: "'Space Grotesk', sans-serif",
+                            size: 12,
+                            weight: 600 as const,
+                        },
                         color: "#0A0A0A",
                         padding: 12,
                     },
@@ -149,7 +159,11 @@ export default function HistoryPage() {
                     mode: "index" as const,
                     intersect: false,
                     backgroundColor: "#0A0A0A",
-                    titleFont: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 as const },
+                    titleFont: {
+                        family: "'Space Grotesk', sans-serif",
+                        size: 13,
+                        weight: 600 as const,
+                    },
                     bodyFont: { family: "'Space Grotesk', sans-serif", size: 12 },
                     padding: 12,
                     borderColor: "#FFE500",
@@ -161,21 +175,35 @@ export default function HistoryPage() {
                     title: {
                         display: true,
                         text: "Time / Dimension",
-                        font: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 as const },
+                        font: {
+                            family: "'Space Grotesk', sans-serif",
+                            size: 13,
+                            weight: 600 as const,
+                        },
                         color: "#0A0A0A",
                     },
                     grid: { color: "rgba(10, 10, 10, 0.1)" },
-                    ticks: { font: { family: "'Space Grotesk', sans-serif", size: 11 }, color: "#0A0A0A" },
+                    ticks: {
+                        font: { family: "'Space Grotesk', sans-serif", size: 11 },
+                        color: "#0A0A0A",
+                    },
                 },
                 y: {
                     title: {
                         display: true,
                         text: "Cost (USD)",
-                        font: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 as const },
+                        font: {
+                            family: "'Space Grotesk', sans-serif",
+                            size: 13,
+                            weight: 600 as const,
+                        },
                         color: "#0A0A0A",
                     },
                     grid: { color: "rgba(10, 10, 10, 0.1)" },
-                    ticks: { font: { family: "'Space Grotesk', sans-serif", size: 11 }, color: "#0A0A0A" },
+                    ticks: {
+                        font: { family: "'Space Grotesk', sans-serif", size: 11 },
+                        color: "#0A0A0A",
+                    },
                 },
             },
         };
@@ -189,35 +217,33 @@ export default function HistoryPage() {
 
     /* ─── Render ─── */
     return (
-        <main className="min-h-screen bg-[#FAFAFA] text-[#0A0A0A] p-4 md:p-8 relative overflow-hidden">
+        <main className="min-h-screen bg-[#FAFAFA] text-[#0A0A0A] p-4 md:p-6 relative overflow-hidden">
             {/* Decorative background elements */}
             <div className="fixed top-10 right-10 w-32 h-32 bg-[#FFE500] rounded-full opacity-20 blur-3xl pointer-events-none" />
             <div className="fixed bottom-20 left-10 w-40 h-40 bg-[#FF6B9D] rounded-full opacity-20 blur-3xl pointer-events-none" />
             <div className="fixed top-1/2 left-1/3 w-36 h-36 bg-[#00D4FF] rounded-full opacity-15 blur-3xl pointer-events-none" />
 
-            <div className="max-w-6xl mx-auto relative z-10">
+            <div className="max-w-[1400px] mx-auto relative z-10 flex flex-col h-[calc(100vh-3rem)]">
                 {/* Header */}
-                <div className="mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div>
-                        <h1 className="text-4xl md:text-5xl font-bold mb-2">
+                <div className="mb-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shrink-0">
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-3xl md:text-4xl font-bold">
                             <span className="inline-block bg-[#B794F6] px-4 py-2 border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] transform -rotate-1">
                                 🕘 HISTORY
                             </span>
                         </h1>
-                        <p className="text-sm md:text-base text-[#0A0A0A]/70 mt-4">
-                            Your recent queries and results
-                        </p>
+                        <span className="text-sm text-[#0A0A0A]/50 font-bold mt-1">
+                            {entries.length} {entries.length === 1 ? "query" : "queries"}
+                        </span>
                     </div>
                     <div className="flex gap-3">
                         {entries.length > 0 && (
                             <button
                                 onClick={handleClear}
-                                className={`border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0 ${confirmClear
-                                        ? "bg-[#FF6B9D] animate-pulse"
-                                        : "bg-white"
+                                className={`border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0 ${confirmClear ? "bg-[#FF6B9D] animate-pulse" : "bg-white"
                                     }`}
                             >
-                                {confirmClear ? "⚠️ CONFIRM CLEAR?" : "🗑️ CLEAR HISTORY"}
+                                {confirmClear ? "⚠️ CONFIRM CLEAR?" : "🗑️ CLEAR"}
                             </button>
                         )}
                         <Link href="/">
@@ -229,107 +255,134 @@ export default function HistoryPage() {
                 </div>
 
                 {/* Empty state */}
-                {entries.length === 0 && (
-                    <div className="bg-white border-4 border-[#0A0A0A] shadow-[12px_12px_0px_#0A0A0A] p-12 text-center">
-                        <div className="text-6xl mb-4">📭</div>
-                        <h2 className="text-2xl font-bold mb-2">No queries yet</h2>
-                        <p className="text-[#0A0A0A]/60 font-medium mb-6">
-                            Run a query on the home page and it will appear here automatically.
-                        </p>
-                        <Link href="/">
-                            <button className="bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-6 py-3 font-bold text-base hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
-                                🚀 RUN YOUR FIRST QUERY
-                            </button>
-                        </Link>
+                {entries.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center">
+                        <div className="bg-white border-4 border-[#0A0A0A] shadow-[12px_12px_0px_#0A0A0A] p-12 text-center max-w-lg">
+                            <div className="text-6xl mb-4">📭</div>
+                            <h2 className="text-2xl font-bold mb-2">No queries yet</h2>
+                            <p className="text-[#0A0A0A]/60 font-medium mb-6">
+                                Run a query on the home page and it will appear here
+                                automatically.
+                            </p>
+                            <Link href="/">
+                                <button className="bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-6 py-3 font-bold text-base hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
+                                    🚀 RUN YOUR FIRST QUERY
+                                </button>
+                            </Link>
+                        </div>
                     </div>
-                )}
-
-                {/* History cards */}
-                <div className="space-y-4">
-                    {entries.map((entry, idx) => {
-                        const isExpanded = expandedId === entry.id;
-                        return (
-                            <div
-                                key={entry.id}
-                                className="bg-white border-4 border-[#0A0A0A] shadow-[8px_8px_0px_#0A0A0A] transition-all duration-200"
-                            >
-                                {/* Card header — clickable */}
-                                <button
-                                    onClick={() => toggleExpand(entry.id)}
-                                    className="w-full text-left px-5 py-4 flex flex-col md:flex-row md:items-center gap-3 hover:bg-[#FAFAFA] transition-colors"
-                                >
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-base truncate">{entry.query}</p>
-                                        <div className="flex flex-wrap items-center gap-2 mt-2">
-                                            <span className="inline-flex items-center gap-1 bg-[#FAFAFA] border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
-                                                👤 {entry.username}
-                                            </span>
-                                            <span className="inline-flex items-center gap-1 bg-[#FAFAFA] border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
-                                                📅 {formatTimestamp(entry.timestamp)}
-                                            </span>
-                                            <span className="inline-flex items-center gap-1 bg-[#00FF94] border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
-                                                ⏱️ {formatDuration(entry.durationMs)}
-                                            </span>
-                                            <span className="text-xs font-medium text-[#0A0A0A]/50">
-                                                {relativeTime(entry.timestamp)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3 shrink-0">
-                                        <span
-                                            className={`text-xl transition-transform duration-300 ${isExpanded ? "rotate-90" : "rotate-0"
+                ) : (
+                    /* ─── Two-panel layout ─── */
+                    <div className="flex-1 flex gap-4 min-h-0">
+                        {/* Left panel — query list */}
+                        <div className="w-80 shrink-0 flex flex-col border-4 border-[#0A0A0A] shadow-[8px_8px_0px_#0A0A0A] bg-white">
+                            <div className="px-4 py-3 bg-[#0A0A0A] text-white shrink-0">
+                                <h2 className="font-bold text-sm uppercase tracking-wide">
+                                    📋 Recent Queries
+                                </h2>
+                            </div>
+                            <div className="flex-1 overflow-y-auto">
+                                {entries.map((entry) => {
+                                    const isActive = selectedId === entry.id;
+                                    return (
+                                        <button
+                                            key={entry.id}
+                                            onClick={() => setSelectedId(entry.id)}
+                                            className={`w-full text-left px-4 py-3 border-b-2 border-[#0A0A0A]/10 transition-all duration-150 hover:bg-[#FFE500]/20 ${isActive
+                                                    ? "bg-[#FFE500]/30 border-l-[6px] border-l-[#FFE500]"
+                                                    : "border-l-[6px] border-l-transparent"
                                                 }`}
                                         >
-                                            ▶
-                                        </span>
-                                    </div>
-                                </button>
+                                            <p
+                                                className={`text-sm leading-snug mb-1.5 line-clamp-2 ${isActive ? "font-bold" : "font-medium"
+                                                    }`}
+                                            >
+                                                {entry.query}
+                                            </p>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="text-[10px] font-bold text-[#0A0A0A]/40 uppercase">
+                                                    {relativeTime(entry.timestamp)}
+                                                </span>
+                                                <span className="text-[10px] font-bold bg-[#00FF94]/50 px-1.5 py-0.5 border border-[#0A0A0A]/20">
+                                                    ⏱ {formatDuration(entry.durationMs)}
+                                                </span>
+                                                <span className="text-[10px] font-bold text-[#0A0A0A]/40">
+                                                    👤 {entry.username}
+                                                </span>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
 
-                                {/* Expanded results */}
-                                {isExpanded && (
-                                    <div className="border-t-4 border-[#0A0A0A] px-5 py-5 space-y-5 bg-[#FAFAFA]">
-                                        {/* Action bar */}
-                                        <div className="flex justify-end">
+                        {/* Right panel — detail view */}
+                        <div className="flex-1 flex flex-col border-4 border-[#0A0A0A] shadow-[8px_8px_0px_#0A0A0A] bg-white min-w-0">
+                            {selectedEntry ? (
+                                <>
+                                    {/* Detail header */}
+                                    <div className="px-5 py-4 bg-[#FAFAFA] border-b-4 border-[#0A0A0A] shrink-0">
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="min-w-0 flex-1">
+                                                <p className="font-bold text-lg leading-snug mb-2">
+                                                    &ldquo;{selectedEntry.query}&rdquo;
+                                                </p>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="inline-flex items-center gap-1 bg-white border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
+                                                        👤 {selectedEntry.username}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 bg-white border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
+                                                        📅 {formatTimestamp(selectedEntry.timestamp)}
+                                                    </span>
+                                                    <span className="inline-flex items-center gap-1 bg-[#00FF94] border-2 border-[#0A0A0A] px-2 py-0.5 text-xs font-bold">
+                                                        ⏱️ {formatDuration(selectedEntry.durationMs)}
+                                                    </span>
+                                                </div>
+                                            </div>
                                             <button
-                                                onClick={() => handleRunAgain(entry.query)}
-                                                className="bg-[#FFE500] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0"
+                                                onClick={() => handleRunAgain(selectedEntry.query)}
+                                                className="bg-[#FFE500] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0 shrink-0"
                                             >
                                                 🔄 RUN AGAIN
                                             </button>
                                         </div>
+                                    </div>
 
+                                    {/* Scrollable results */}
+                                    <div className="flex-1 overflow-y-auto p-5 space-y-5">
                                         {/* Summary */}
-                                        {entry.response.summary && (
+                                        {selectedEntry.response.summary && (
                                             <div className="bg-[#FFE500] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-4">
                                                 <div className="flex items-center flex-wrap gap-3 mb-2">
                                                     <h2 className="font-bold text-lg uppercase tracking-wide">
                                                         📊 Summary
                                                     </h2>
                                                     <span className="inline-flex items-center gap-2 bg-white border-2 border-[#0A0A0A] shadow-[3px_3px_0px_#0A0A0A] px-3 py-1 text-sm font-bold uppercase tracking-wide">
-                                                        🧠 Thought for {formatDuration(entry.durationMs)}
+                                                        🧠 Thought for{" "}
+                                                        {formatDuration(selectedEntry.durationMs)}
                                                     </span>
                                                 </div>
                                                 <p className="text-base leading-relaxed font-medium">
-                                                    {entry.response.summary}
+                                                    {selectedEntry.response.summary}
                                                 </p>
                                             </div>
                                         )}
 
                                         {/* Chart */}
-                                        {entry.response.chart && (
+                                        {selectedEntry.response.chart && (
                                             <div className="bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5">
                                                 <h2 className="font-bold text-lg mb-4 uppercase tracking-wide bg-[#00D4FF] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
                                                     📈 Cost Chart
                                                 </h2>
                                                 <div className="h-80 mt-4">
-                                                    {renderChart(entry.response)}
+                                                    {renderChart(selectedEntry.response)}
                                                 </div>
                                             </div>
                                         )}
 
                                         {/* Table */}
-                                        {entry.response.table &&
-                                            entry.response.table.rows?.length > 0 && (
+                                        {selectedEntry.response.table &&
+                                            selectedEntry.response.table.rows?.length > 0 && (
                                                 <div className="bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5 overflow-x-auto">
                                                     <h2 className="font-bold text-lg mb-4 uppercase tracking-wide bg-[#B794F6] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
                                                         📋 Details
@@ -338,52 +391,61 @@ export default function HistoryPage() {
                                                         <table className="min-w-full text-sm border-collapse mt-4">
                                                             <thead>
                                                                 <tr className="bg-[#0A0A0A] text-white">
-                                                                    {entry.response.table.columns.map((col) => (
-                                                                        <th
-                                                                            key={col}
-                                                                            className="px-4 py-3 text-left font-bold border-2 border-[#0A0A0A] uppercase text-xs tracking-wide"
-                                                                        >
-                                                                            {col}
-                                                                        </th>
-                                                                    ))}
+                                                                    {selectedEntry.response.table.columns.map(
+                                                                        (col) => (
+                                                                            <th
+                                                                                key={col}
+                                                                                className="px-4 py-3 text-left font-bold border-2 border-[#0A0A0A] uppercase text-xs tracking-wide"
+                                                                            >
+                                                                                {col}
+                                                                            </th>
+                                                                        )
+                                                                    )}
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                {entry.response.table.rows.map((row, i) => (
-                                                                    <tr
-                                                                        key={i}
-                                                                        className={
-                                                                            i % 2 === 0 ? "bg-[#FAFAFA]" : "bg-white"
-                                                                        }
-                                                                    >
-                                                                        {row.map((cell, j) => (
-                                                                            <td
-                                                                                key={j}
-                                                                                className="px-4 py-3 border-2 border-[#0A0A0A] font-medium"
-                                                                            >
-                                                                                {cell as any}
-                                                                            </td>
-                                                                        ))}
-                                                                    </tr>
-                                                                ))}
+                                                                {selectedEntry.response.table.rows.map(
+                                                                    (row, i) => (
+                                                                        <tr
+                                                                            key={i}
+                                                                            className={
+                                                                                i % 2 === 0
+                                                                                    ? "bg-[#FAFAFA]"
+                                                                                    : "bg-white"
+                                                                            }
+                                                                        >
+                                                                            {row.map((cell, j) => (
+                                                                                <td
+                                                                                    key={j}
+                                                                                    className="px-4 py-3 border-2 border-[#0A0A0A] font-medium"
+                                                                                >
+                                                                                    {cell as any}
+                                                                                </td>
+                                                                            ))}
+                                                                        </tr>
+                                                                    )
+                                                                )}
                                                             </tbody>
                                                         </table>
                                                     </div>
                                                 </div>
                                             )}
                                     </div>
-                                )}
-                            </div>
-                        );
-                    })}
-                </div>
-
-                {/* Footer */}
-                <div className="text-center mt-8">
-                    <p className="text-sm font-medium text-[#0A0A0A]/60">
-                        Showing {entries.length} recent {entries.length === 1 ? "query" : "queries"} • Max 25 stored
-                    </p>
-                </div>
+                                </>
+                            ) : (
+                                <div className="flex-1 flex items-center justify-center text-[#0A0A0A]/40">
+                                    <div className="text-center">
+                                        <div className="text-5xl mb-3">👈</div>
+                                        <p className="font-bold text-lg">Select a query</p>
+                                        <p className="text-sm mt-1">
+                                            Choose a query from the left panel to view its results.
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
         </main>
     );
