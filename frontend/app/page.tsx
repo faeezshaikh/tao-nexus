@@ -1,0 +1,491 @@
+"use client";
+
+import { useState } from "react";
+import { FinopsResponse } from "../types/finops";
+import { useAuth } from "../contexts/AuthContext";
+import { isAdmin } from "../lib/auth";
+import LoginPage from "../components/LoginPage";
+import Link from "next/link";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+import { Line, Bar } from "react-chartjs-2";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Legend
+);
+
+// Pre-canned prompts catalog
+const PROMPT_CATALOG = [
+  {
+    category: "Cost Analysis",
+    prompts: [
+      "Show EC2 cost by region for the last full month",
+      "What are my top 5 most expensive services this month?",
+      "Break down S3 storage cost by bucket for last 6 months",
+      "Compare this month's total cost vs last 6 months",
+    ],
+  },
+  {
+    category: "Forecasting",
+    prompts: [
+      "Forecast total AWS cost for next month",
+      "Predict EC2 spending for the next quarter",
+      "What will my S3 costs be next month based on current trends?",
+    ],
+  },
+  {
+    category: "Trends & Insights",
+    prompts: [
+      "Show me cost trends over the last 6 months",
+      "Which services have the highest cost growth?",
+      "Identify any unusual spending patterns this week",
+      "Show daily cost breakdown for the current month",
+    ],
+  },
+  {
+    category: "Resource Optimization",
+    prompts: [
+      "What are my idle or underutilized resources?",
+      "Show RDS costs grouped by instance type",
+      "List Lambda costs by function for last 7 days",
+      "Compare data transfer costs across regions",
+    ],
+  },
+];
+
+export default function Home() {
+  const { user, logout, isLoading: authLoading } = useAuth();
+  const [question, setQuestion] = useState("");
+  const [data, setData] = useState<FinopsResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [lastExecutedQuery, setLastExecutedQuery] = useState<string>("");
+  const [thoughtMs, setThoughtMs] = useState<number | null>(null);
+
+  // Show login page if not authenticated
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
+        <div className="text-2xl font-bold">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  const formatDuration = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+
+    if (minutes > 0) {
+      return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+    }
+    return `${seconds}s`;
+  };
+
+  async function runQuery() {
+    if (!question.trim()) return;
+
+    // Safe username extraction
+    const currentUsername = user?.username || "anonymous";
+
+    const queryToExecute = question.trim();
+    setLastExecutedQuery(queryToExecute);
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setThoughtMs(null);
+    const startedAt = performance.now();
+
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.103.30.81:8000";
+
+    try {
+      const res = await fetch(`${API_URL}/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: queryToExecute,
+          username: currentUsername
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `HTTP ${res.status}`);
+      }
+
+      const json = (await res.json()) as FinopsResponse;
+      setData(json);
+      setThoughtMs(performance.now() - startedAt);
+    } catch (err: any) {
+      setError(err.message || "Something went wrong");
+      setThoughtMs(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const selectPrompt = (prompt: string) => {
+    setQuestion(prompt);
+    setCatalogOpen(false);
+  };
+
+  const chartElement = (() => {
+    if (!data?.chart) return null;
+
+    const { x, series, type } = data.chart;
+
+    const chartData = {
+      labels: x,
+      datasets: series.map((s, idx) => ({
+        label: s.name,
+        data: s.values,
+        borderWidth: 3,
+        backgroundColor: [
+          "rgba(255, 229, 0, 0.3)",
+          "rgba(255, 107, 157, 0.3)",
+          "rgba(0, 212, 255, 0.3)",
+          "rgba(0, 255, 148, 0.3)",
+        ][idx % 4],
+        borderColor: [
+          "rgba(255, 229, 0, 1)",
+          "rgba(255, 107, 157, 1)",
+          "rgba(0, 212, 255, 1)",
+          "rgba(0, 255, 148, 1)",
+        ][idx % 4],
+      })),
+    };
+
+    const commonOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 750, // Keep chart rendering animation (bars growing, etc.)
+      },
+      transitions: {
+        active: {
+          animation: {
+            duration: 0, // Instant tooltip response when hovering
+          },
+        },
+      },
+      plugins: {
+        legend: {
+          position: "top" as const,
+          labels: {
+            font: { family: "'Space Grotesk', sans-serif", size: 12, weight: 600 },
+            color: "#0A0A0A",
+            padding: 12,
+          }
+        },
+        tooltip: {
+          enabled: true,
+          mode: "index" as const,
+          intersect: false,
+          backgroundColor: "#0A0A0A",
+          titleFont: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 },
+          bodyFont: { family: "'Space Grotesk', sans-serif", size: 12 },
+          padding: 12,
+          borderColor: "#FFE500",
+          borderWidth: 2,
+        },
+      },
+      scales: {
+        x: {
+          title: {
+            display: true,
+            text: "Time / Dimension",
+            font: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 },
+            color: "#0A0A0A",
+          },
+          grid: { color: "rgba(10, 10, 10, 0.1)" },
+          ticks: {
+            font: { family: "'Space Grotesk', sans-serif", size: 11 },
+            color: "#0A0A0A",
+          },
+        },
+        y: {
+          title: {
+            display: true,
+            text: "Cost (USD)",
+            font: { family: "'Space Grotesk', sans-serif", size: 13, weight: 600 },
+            color: "#0A0A0A",
+          },
+          grid: { color: "rgba(10, 10, 10, 0.1)" },
+          ticks: {
+            font: { family: "'Space Grotesk', sans-serif", size: 11 },
+            color: "#0A0A0A",
+          },
+        },
+      },
+    };
+
+    return type === "bar" ? (
+      <Bar data={chartData} options={commonOptions} />
+    ) : (
+      <Line data={chartData} options={commonOptions} />
+    );
+  })();
+
+  return (
+    <main className="min-h-screen bg-[#FAFAFA] text-[#0A0A0A] p-4 md:p-8 relative overflow-hidden">
+      {/* Decorative background elements */}
+      <div className="fixed top-10 right-10 w-32 h-32 bg-[#FFE500] rounded-full opacity-20 blur-3xl pointer-events-none" />
+      <div className="fixed bottom-20 left-10 w-40 h-40 bg-[#FF6B9D] rounded-full opacity-20 blur-3xl pointer-events-none" />
+      <div className="fixed top-1/2 left-1/3 w-36 h-36 bg-[#00D4FF] rounded-full opacity-15 blur-3xl pointer-events-none" />
+
+      <div className="max-w-6xl mx-auto relative z-10">
+        {/* User Info & Logout */}
+        <div className="flex justify-end mb-4 gap-3">
+          {isAdmin(user) && (
+            <Link href="/analytics">
+              <button className="bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
+                📊 ANALYTICS
+              </button>
+            </Link>
+          )}
+          <div className="bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 flex items-center gap-3">
+            <span className="font-bold text-sm">👤 {user.displayName}</span>
+            <button
+              onClick={logout}
+              className="bg-[#FF6B9D] border-2 border-[#0A0A0A] px-3 py-1 font-bold text-xs hover:shadow-[4px_4px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[2px_2px_0px_#0A0A0A] active:translate-y-0"
+            >
+              LOGOUT
+            </button>
+          </div>
+        </div>
+
+        {/* Header */}
+        <div className="mb-8 text-center">
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <img
+              src="/lens-icon.png"
+              alt="TAO Lens"
+              className="w-16 h-16 md:w-20 md:h-20 border-4 border-[#0A0A0A] shadow-[4px_4px_0px_#0A0A0A] bg-white p-2 transform -rotate-6"
+            />
+            <h1 className="text-4xl md:text-6xl font-bold tracking-tight">
+              <span className="inline-block bg-[#FFE500] px-4 py-2 border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] transform -rotate-1">
+                TAO
+              </span>
+              <span className="inline-block ml-3 bg-[#00D4FF] px-4 py-2 border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] transform rotate-1">
+                LENS
+              </span>
+            </h1>
+          </div>
+          <p className="text-lg md:text-xl font-medium mt-6 max-w-2xl mx-auto">
+            Ask natural-language questions about your AWS costs
+          </p>
+          <p className="text-sm md:text-base text-[#0A0A0A]/70 mt-2">
+            Powered by AWS MCP Server & AI-Driven Analytics
+          </p>
+        </div>
+
+        {/* Main Card */}
+        <div className="bg-white border-4 border-[#0A0A0A] shadow-[12px_12px_0px_#0A0A0A] p-6 md:p-8 mb-8 relative">
+          {/* Prompt Catalog Toggle Button */}
+          <button
+            onClick={() => setCatalogOpen(!catalogOpen)}
+            className="absolute -top-5 -right-5 bg-[#FF6B9D] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-6 py-3 font-bold text-sm md:text-base hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 hover:translate-x-0.5 transition-all duration-200 active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0.5 active:-translate-x-0.5 z-20"
+            aria-label="Toggle prompt catalog"
+          >
+            {catalogOpen ? "✕ CLOSE" : "✨ PROMPTS"}
+          </button>
+
+          {/* Sliding Prompt Catalog */}
+          <div
+            className={`fixed top-0 right-0 h-full w-full md:w-[480px] bg-white border-l-4 border-[#0A0A0A] shadow-[-12px_0px_0px_#0A0A0A] transition-transform duration-500 ease-in-out z-50 overflow-y-auto ${catalogOpen ? "translate-x-0" : "translate-x-full"
+              }`}
+          >
+            <div className="p-6 md:p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl md:text-3xl font-bold">Prompt Catalog</h2>
+                <button
+                  onClick={() => setCatalogOpen(false)}
+                  className="bg-[#0A0A0A] text-white border-3 border-[#0A0A0A] px-4 py-2 font-bold hover:bg-[#FFE500] hover:text-[#0A0A0A] transition-colors"
+                  aria-label="Close catalog"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {PROMPT_CATALOG.map((category, catIdx) => (
+                  <div key={catIdx} className="border-4 border-[#0A0A0A] bg-[#FAFAFA] p-4">
+                    <h3 className="text-lg font-bold mb-3 bg-[#00FF94] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
+                      {category.category}
+                    </h3>
+                    <div className="space-y-2">
+                      {category.prompts.map((prompt, pIdx) => (
+                        <button
+                          key={pIdx}
+                          onClick={() => selectPrompt(prompt)}
+                          className="w-full text-left bg-white border-3 border-[#0A0A0A] px-4 py-3 font-medium text-sm hover:bg-[#FFE500] hover:shadow-[4px_4px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all duration-150 active:shadow-[2px_2px_0px_#0A0A0A] active:translate-y-0"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Overlay when catalog is open */}
+          {catalogOpen && (
+            <div
+              className="fixed inset-0 bg-[#0A0A0A]/30 backdrop-blur-sm z-40"
+              onClick={() => setCatalogOpen(false)}
+            />
+          )}
+
+          {/* Input Section */}
+          <div className="mb-6">
+            <label className="block text-sm font-bold mb-3 uppercase tracking-wide">
+              Your Question
+            </label>
+            <div className="flex flex-col md:flex-row gap-4">
+              <textarea
+                className="flex-1 border-4 border-[#0A0A0A] px-4 py-3 text-base font-medium focus:outline-none focus:shadow-[6px_6px_0px_#0A0A0A] focus:-translate-y-1 transition-all resize-none min-h-[100px] bg-[#FAFAFA]"
+                placeholder="e.g. Show EC2 cost by region for the last full month"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && e.metaKey) {
+                    runQuery();
+                  }
+                }}
+              />
+              <button
+                onClick={runQuery}
+                disabled={loading || !question.trim()}
+                className="md:w-44 h-auto md:h-[100px] bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-6 py-4 font-bold text-lg hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-1 hover:translate-x-1 transition-all duration-200 disabled:bg-[#E0E0E0] disabled:cursor-not-allowed disabled:shadow-[4px_4px_0px_#0A0A0A] active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0.5 active:-translate-x-0.5"
+              >
+                {loading ? "⏳ ANALYZING..." : "🚀 RUN QUERY"}
+              </button>
+            </div>
+            {!loading && !data && !error && (
+              <p className="text-xs mt-3 text-[#0A0A0A]/60 font-medium">
+                💡 Tip: Click the <span className="font-bold text-[#FF6B9D]">✨ PROMPTS</span> button to browse pre-made queries!
+              </p>
+            )}
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="mb-6 bg-[#FF6B9D] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-4">
+              <p className="font-bold text-sm">⚠️ ERROR</p>
+              <p className="text-sm mt-1">{error}</p>
+            </div>
+          )}
+
+          {/* Query Display - Shows what the results are for */}
+          {lastExecutedQuery && data && (
+            <div className="mb-6 bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-4">
+              <h2 className="font-bold text-sm mb-2 uppercase tracking-wide text-[#0A0A0A]/70">
+                🔍 Query Results For:
+              </h2>
+              <p className="text-base leading-relaxed font-bold italic">"{lastExecutedQuery}"</p>
+            </div>
+          )}
+
+          {/* Summary */}
+          {data?.summary && (
+            <div className="mb-6 bg-[#FFE500] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-4">
+              <div className="flex items-center flex-wrap gap-3 mb-2">
+                <h2 className="font-bold text-lg uppercase tracking-wide">
+                  📊 Summary
+                </h2>
+                {thoughtMs !== null && (
+                  <span className="inline-flex items-center gap-2 bg-white border-2 border-[#0A0A0A] shadow-[3px_3px_0px_#0A0A0A] px-3 py-1 text-sm font-bold uppercase tracking-wide">
+                    🧠 Thought for {formatDuration(thoughtMs)}
+                  </span>
+                )}
+              </div>
+              <p className="text-base leading-relaxed font-medium">{data.summary}</p>
+            </div>
+          )}
+
+          {/* Chart */}
+          {chartElement && (
+            <div className="mb-6 bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5">
+              <h2 className="font-bold text-lg mb-4 uppercase tracking-wide bg-[#00D4FF] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
+                📈 Cost Chart
+              </h2>
+              <div className="h-80 mt-4">
+                {chartElement}
+              </div>
+            </div>
+          )}
+
+          {/* Table */}
+          {data?.table && data.table.rows?.length > 0 && (
+            <div className="bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5 overflow-x-auto">
+              <h2 className="font-bold text-lg mb-4 uppercase tracking-wide bg-[#B794F6] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
+                📋 Details
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm border-collapse mt-4">
+                  <thead>
+                    <tr className="bg-[#0A0A0A] text-white">
+                      {data.table.columns.map((col) => (
+                        <th
+                          key={col}
+                          className="px-4 py-3 text-left font-bold border-2 border-[#0A0A0A] uppercase text-xs tracking-wide"
+                        >
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.table.rows.map((row, i) => (
+                      <tr
+                        key={i}
+                        className={i % 2 === 0 ? "bg-[#FAFAFA]" : "bg-white"}
+                      >
+                        {row.map((cell, j) => (
+                          <td
+                            key={j}
+                            className="px-4 py-3 border-2 border-[#0A0A0A] font-medium"
+                          >
+                            {cell as any}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="text-center">
+          <p className="text-sm font-medium text-[#0A0A0A]/60">
+            Built with ❤️ by the Tuning and Optimization (TAO) Team at Discount Tire
+          </p>
+        </div>
+      </div>
+    </main>
+  );
+}
