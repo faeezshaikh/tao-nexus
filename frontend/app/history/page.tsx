@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useRouter } from "next/navigation";
-import { getHistory, clearHistory } from "../../lib/history";
+import { getHistory, clearHistory, deleteHistoryEntry } from "../../lib/history";
 import { HistoryEntry, FinopsResponse } from "../../types/finops";
 import LoginPage from "../../components/LoginPage";
 import Link from "next/link";
@@ -35,6 +35,7 @@ export default function HistoryPage() {
     const [entries, setEntries] = useState<HistoryEntry[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [confirmClear, setConfirmClear] = useState(false);
+    const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!authLoading && user) {
@@ -71,6 +72,25 @@ export default function HistoryPage() {
 
     const handleRunAgain = (query: string) => {
         router.push(`/?q=${encodeURIComponent(query)}`);
+    };
+
+    const handleDelete = (id: string) => {
+        if (confirmDeleteId !== id) {
+            setConfirmDeleteId(id);
+            return;
+        }
+        deleteHistoryEntry(id);
+        const updated = entries.filter((e) => e.id !== id);
+        setEntries(updated);
+        setConfirmDeleteId(null);
+        if (selectedId === id) {
+            setSelectedId(updated.length > 0 ? updated[0].id : null);
+        }
+    };
+
+    const handleSelect = (id: string) => {
+        setSelectedId(id);
+        setConfirmDeleteId(null);
     };
 
     const formatDuration = (ms: number) => {
@@ -243,7 +263,7 @@ export default function HistoryPage() {
                                 className={`border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0 ${confirmClear ? "bg-[#FF6B9D] animate-pulse" : "bg-white"
                                     }`}
                             >
-                                {confirmClear ? "⚠️ CONFIRM CLEAR?" : "🗑️ CLEAR"}
+                                {confirmClear ? "⚠️ CONFIRM CLEAR ALL?" : "🗑️ CLEAR ALL"}
                             </button>
                         )}
                         <Link href="/">
@@ -284,15 +304,38 @@ export default function HistoryPage() {
                             <div className="flex-1 overflow-y-auto">
                                 {entries.map((entry) => {
                                     const isActive = selectedId === entry.id;
+                                    const isConfirmingDelete = confirmDeleteId === entry.id;
                                     return (
                                         <button
                                             key={entry.id}
-                                            onClick={() => setSelectedId(entry.id)}
-                                            className={`w-full text-left px-4 py-3 border-b-2 border-[#0A0A0A]/10 transition-all duration-150 hover:bg-[#FFE500]/20 ${isActive
-                                                    ? "bg-[#FFE500]/30 border-l-[6px] border-l-[#FFE500]"
-                                                    : "border-l-[6px] border-l-transparent"
+                                            onClick={() => handleSelect(entry.id)}
+                                            className={`w-full text-left px-4 py-3 border-b-2 border-[#0A0A0A]/10 transition-all duration-150 hover:bg-[#FFE500]/20 group relative ${isActive
+                                                ? "bg-[#FFE500]/30 border-l-[6px] border-l-[#FFE500]"
+                                                : "border-l-[6px] border-l-transparent"
                                                 }`}
                                         >
+                                            {/* Delete button */}
+                                            <span
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleDelete(entry.id);
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.stopPropagation();
+                                                        handleDelete(entry.id);
+                                                    }
+                                                }}
+                                                className={`absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 text-xs font-bold transition-all cursor-pointer border-2 ${isConfirmingDelete
+                                                        ? "bg-[#FF6B9D] text-[#0A0A0A] border-[#0A0A0A] opacity-100 shadow-[2px_2px_0px_#0A0A0A]"
+                                                        : "text-[#0A0A0A]/40 border-transparent hover:text-[#0A0A0A] hover:bg-[#FF6B9D]/30 hover:border-[#0A0A0A]/30 opacity-0 group-hover:opacity-100"
+                                                    }`}
+                                                title={isConfirmingDelete ? "Click again to confirm" : "Delete this entry"}
+                                            >
+                                                🗑️ {isConfirmingDelete && <span>Sure?</span>}
+                                            </span>
                                             <p
                                                 className={`text-sm leading-snug mb-1.5 line-clamp-2 ${isActive ? "font-bold" : "font-medium"
                                                     }`}

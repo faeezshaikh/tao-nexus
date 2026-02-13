@@ -28,6 +28,12 @@ export function getHistoryEntry(id: string): HistoryEntry | null {
     return getHistory().find((e) => e.id === id) ?? null;
 }
 
+/** Remove a single entry by id. */
+export function deleteHistoryEntry(id: string): void {
+    const history = getHistory().filter((e) => e.id !== id);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+}
+
 /** Remove all history entries. */
 export function clearHistory(): void {
     localStorage.removeItem(STORAGE_KEY);
