@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { FinopsResponse } from "../types/finops";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdmin } from "../lib/auth";
@@ -81,6 +81,17 @@ export default function Home() {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [lastExecutedQuery, setLastExecutedQuery] = useState<string>("");
   const [thoughtMs, setThoughtMs] = useState<number | null>(null);
+  const [progressStatus, setProgressStatus] = useState<{
+    step: number;
+    total: number;
+    message: string;
+    emoji: string;
+  } | null>(null);
+  const [completedSteps, setCompletedSteps] = useState<
+    { step: number; message: string; emoji: string }[]
+  >([]);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Show login page if not authenticated
   if (authLoading) {
@@ -118,17 +129,25 @@ export default function Home() {
     setError(null);
     setData(null);
     setThoughtMs(null);
+    setProgressStatus(null);
+    setCompletedSteps([]);
+    setElapsedSeconds(0);
     const startedAt = performance.now();
+
+    // Start elapsed timer
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds(Math.floor((performance.now() - startedAt) / 1000));
+    }, 1000);
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.103.30.81:8000";
 
     try {
-      const res = await fetch(`${API_URL}/query`, {
+      const res = await fetch(`${API_URL}/query/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: queryToExecute,
-          username: currentUsername
+          username: currentUsername,
         }),
       });
 
@@ -137,14 +156,52 @@ export default function Home() {
         throw new Error(body?.detail || `HTTP ${res.status}`);
       }
 
-      const json = (await res.json()) as FinopsResponse;
-      setData(json);
-      setThoughtMs(performance.now() - startedAt);
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response stream available");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6);
+            try {
+              const payload = JSON.parse(jsonStr);
+              if (currentEvent === "progress") {
+                setProgressStatus(payload);
+                setCompletedSteps((prev) => {
+                  if (prev.some((s) => s.step === payload.step)) return prev;
+                  return [...prev, { step: payload.step, message: payload.message, emoji: payload.emoji }];
+                });
+              } else if (currentEvent === "result") {
+                setData(payload as FinopsResponse);
+                setThoughtMs(performance.now() - startedAt);
+              }
+            } catch {
+              // ignore malformed JSON
+            }
+          }
+        }
+      }
     } catch (err: any) {
       setError(err.message || "Something went wrong");
       setThoughtMs(null);
     } finally {
       setLoading(false);
+      setProgressStatus(null);
+      setCompletedSteps([]);
+      if (timerRef.current) clearInterval(timerRef.current);
     }
   }
 
@@ -401,6 +458,91 @@ export default function Home() {
               <p className="text-sm mt-1">{error}</p>
             </div>
           )}
+
+          {/* Live Progress Indicator */}
+          {loading && progressStatus && (
+            <div className="mb-6 bg-white border-4 border-[#0A0A0A] shadow-[8px_8px_0px_#0A0A0A] px-5 py-5 overflow-hidden">
+              {/* Header Row */}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-sm uppercase tracking-wide bg-[#00D4FF] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
+                  ⚙️ Processing Pipeline
+                </h2>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-bold text-sm bg-[#FAFAFA] border-2 border-[#0A0A0A] px-3 py-1">
+                    ⏱️ {elapsedSeconds}s
+                  </span>
+                  <span className="font-bold text-sm bg-[#FFE500] border-2 border-[#0A0A0A] px-3 py-1">
+                    Step {progressStatus.step} / {progressStatus.total}
+                  </span>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full h-6 bg-[#FAFAFA] border-3 border-[#0A0A0A] mb-4 overflow-hidden relative">
+                <div
+                  className="h-full transition-all duration-500 ease-out relative"
+                  style={{
+                    width: `${(progressStatus.step / progressStatus.total) * 100}%`,
+                    background: "repeating-linear-gradient(45deg, #00FF94, #00FF94 10px, #00D4FF 10px, #00D4FF 20px)",
+                    backgroundSize: "28.28px 28.28px",
+                    animation: "barberpole 0.8s linear infinite",
+                  }}
+                />
+              </div>
+
+              {/* Current Step - Big & Bold */}
+              <div className="bg-[#FFE500] border-3 border-[#0A0A0A] shadow-[4px_4px_0px_#0A0A0A] px-4 py-3 mb-4 flex items-center gap-3">
+                <span
+                  className="text-2xl"
+                  style={{ animation: "bounce 1s ease-in-out infinite" }}
+                >
+                  {progressStatus.emoji}
+                </span>
+                <span className="font-bold text-base">{progressStatus.message}</span>
+              </div>
+
+              {/* Step Timeline */}
+              <div className="space-y-1">
+                {completedSteps.map((s, i) => {
+                  const isCurrent = s.step === progressStatus.step;
+                  const isDone = s.step < progressStatus.step;
+                  return (
+                    <div
+                      key={s.step}
+                      className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium transition-all duration-300 border-2 ${isCurrent
+                        ? "border-[#0A0A0A] bg-[#00FF94] shadow-[3px_3px_0px_#0A0A0A] -translate-y-0.5"
+                        : isDone
+                          ? "border-[#0A0A0A]/30 bg-[#FAFAFA] text-[#0A0A0A]/50"
+                          : "border-transparent bg-transparent text-[#0A0A0A]/30"
+                        }`}
+                      style={{
+                        animationName: isCurrent ? "none" : undefined,
+                        animationDuration: isCurrent ? "0s" : undefined,
+                        animationDelay: isCurrent ? undefined : `${i * 100}ms`,
+                      }}
+                    >
+                      <span className="text-base">
+                        {isDone ? "✅" : isCurrent ? s.emoji : "⬜"}
+                      </span>
+                      <span>{s.message}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Inline CSS for barber-pole animation */}
+          <style jsx>{`
+            @keyframes barberpole {
+              0% { background-position: 0 0; }
+              100% { background-position: 28.28px 0; }
+            }
+            @keyframes bounce {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-6px); }
+            }
+          `}</style>
 
           {/* Query Display - Shows what the results are for */}
           {lastExecutedQuery && data && (

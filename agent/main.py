@@ -1,12 +1,14 @@
 """
 FastAPI Agent for AWS Cost Explorer MCP Server.
 """
+import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from models import QueryRequest, QueryResponse, FinopsQueryRequest, FinopsResponse
 from agent_orchestrator import AgentOrchestrator
@@ -98,6 +100,45 @@ async def query_finops(request: FinopsQueryRequest) -> FinopsResponse:
             status_code=500,
             detail=f"Error processing query: {str(e)}"
         )
+
+
+@app.post("/query/stream")
+async def query_finops_stream(request: FinopsQueryRequest):
+    """
+    SSE streaming endpoint — sends real-time progress events while
+    processing the query, then emits the final result.
+    """
+    logger.info(f"Received streaming query: {request.question} from user: {request.username}")
+
+    progress_queue: asyncio.Queue = asyncio.Queue()
+
+    async def event_generator():
+        # Launch the orchestrator in a background task
+        task = asyncio.create_task(
+            orchestrator.process_finops_query_stream(
+                request.question, request.username, progress_queue
+            )
+        )
+
+        # Stream progress events as they arrive
+        while True:
+            event = await progress_queue.get()
+            if event is None:  # sentinel — progress done
+                break
+            yield f"event: progress\ndata: {json.dumps(event)}\n\n"
+
+        # Await final result and send it
+        result = await task
+        yield f"event: result\ndata: {result.model_dump_json()}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx buffering
+        },
+    )
 
 
 @app.post("/api/query", response_model=QueryResponse)

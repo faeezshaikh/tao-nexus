@@ -10,6 +10,7 @@ Handles the full pipeline:
 6. Format data for the frontend (charts + tables)
 7. Generate a human-friendly summary via Ollama
 """
+import asyncio
 import logging
 import json
 import math
@@ -1069,6 +1070,102 @@ class AgentOrchestrator:
             chart=finops_chart,
             table=finops_table,
         )
+
+    async def process_finops_query_stream(
+        self, user_query: str, username: str, progress_queue: asyncio.Queue
+    ) -> FinopsResponse:
+        """Process query with real-time progress events pushed to queue.
+        
+        Each event is a dict: {step, total, message, emoji}
+        A None sentinel signals completion of progress events.
+        """
+        TOTAL_STEPS = 8
+
+        async def report(step: int, message: str, emoji: str = "⏳"):
+            await progress_queue.put(
+                {"step": step, "total": TOTAL_STEPS, "message": message, "emoji": emoji}
+            )
+
+        try:
+            # Step 1: Extract intent
+            await report(1, "Understanding your question…", "🧠")
+            intent_data = await self.ollama_client.extract_query_intent(user_query)
+            logger.info(f"[stream] Extracted intent: {intent_data}")
+
+            # Step 2: Connect to MCP
+            await report(2, "Connecting to AWS Cost Explorer…", "🔌")
+            async with self.mcp_client.connect():
+                today = await self._get_today(intent_data)
+
+                # Step 3: Resolve service names
+                await report(3, "Resolving service names…", "🔍")
+                intent_data = await self._resolve_service_names(intent_data, today)
+
+                # Step 4: Calculate date ranges
+                await report(4, "Calculating date ranges…", "📅")
+                intent_data = self._validate_group_by(intent_data)
+                date_ranges = self._calculate_date_ranges(intent_data, today)
+
+                # Step 5: Call MCP tool
+                intent = intent_data.get("intent", "get_costs")
+                tool_name_map = {
+                    "forecast_costs": "get_cost_forecast",
+                    "compare_costs": "get_cost_and_usage_comparisons",
+                    "get_cost_drivers": "get_cost_comparison_drivers",
+                }
+                tool_display = tool_name_map.get(intent, "get_cost_and_usage")
+                await report(5, f"Querying {tool_display}…", "⚡")
+                mcp_results = await self._call_mcp_tool(intent, intent_data, date_ranges, today)
+
+            # Step 6: Check for errors
+            error_msg = self._check_mcp_error(mcp_results)
+            if error_msg:
+                await report(TOTAL_STEPS, "Done!", "⚠️")
+                await progress_queue.put(None)
+                return FinopsResponse(
+                    summary=error_msg,
+                    chart=FinopsChartData(type="bar", x=[], series=[]),
+                    table=FinopsTableData(columns=[], rows=[]),
+                )
+
+            # Step 6: Format results
+            await report(6, "Building charts & tables…", "📊")
+            chart_data = self._format_chart_data(mcp_results, intent_data)
+            table_data = self._format_table_data(mcp_results, intent_data)
+
+            # Step 7: Generate summary
+            await report(7, "Generating summary with AI…", "✍️")
+            summary = await self.ollama_client.generate_summary(user_query, mcp_results)
+
+            # Step 8: Done!
+            await report(TOTAL_STEPS, "Done!", "✅")
+            await progress_queue.put(None)  # sentinel
+
+            query_response = QueryResponse(
+                summary=summary,
+                chart_data=chart_data,
+                table_data=table_data,
+                success=True,
+            )
+
+            finops_chart = self._convert_to_finops_chart(query_response.chart_data)
+            finops_table = self._convert_to_finops_table(query_response.table_data)
+
+            return FinopsResponse(
+                summary=query_response.summary,
+                chart=finops_chart,
+                table=finops_table,
+            )
+
+        except Exception as e:
+            logger.error(f"[stream] Error: {str(e)}", exc_info=True)
+            await report(TOTAL_STEPS, f"Error: {str(e)}", "❌")
+            await progress_queue.put(None)
+            return FinopsResponse(
+                summary=f"I encountered an error processing your query: {str(e)}",
+                chart=FinopsChartData(type="bar", x=[], series=[]),
+                table=FinopsTableData(columns=[], rows=[]),
+            )
 
     def _convert_to_finops_chart(self, chart_data_list: List[ChartData]) -> FinopsChartData:
         """Convert internal ChartData to FinopsChartData."""
