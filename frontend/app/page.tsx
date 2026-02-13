@@ -33,36 +33,41 @@ const PROMPT_CATALOG = [
   {
     category: "Cost Analysis",
     prompts: [
-      "Show EC2 cost by region for the last full month",
-      "What are my top 5 most expensive services this month?",
-      "Break down S3 storage cost by bucket for last 6 months",
-      "Compare this month's total cost vs last 6 months",
+      "What were my total AWS costs last month?",
+      "Show EC2 costs by region for the last full month",
+      "Break down S3 costs for the last 6 months",
     ],
   },
   {
     category: "Forecasting",
     prompts: [
-      "Forecast total AWS cost for next month",
+      "Forecast total AWS costs for next month",
+      "What will my S3 costs be next month?",
       "Predict EC2 spending for the next quarter",
-      "What will my S3 costs be next month based on current trends?",
+    ],
+  },
+  {
+    category: "Resource Utilization",
+    prompts: [
+      "Show RDS costs grouped by instance type",
+      "Show Lambda costs for last 7 days",
+      "Compare data transfer costs across regions",
     ],
   },
   {
     category: "Trends & Insights",
     prompts: [
       "Show me cost trends over the last 6 months",
-      "Which services have the highest cost growth?",
-      "Identify any unusual spending patterns this week",
       "Show daily cost breakdown for the current month",
+      "Compare costs between last month and the month before",
     ],
   },
   {
-    category: "Resource Optimization",
+    category: "Anomalies",
     prompts: [
-      "What are my idle or underutilized resources?",
-      "Show RDS costs grouped by instance type",
-      "List Lambda costs by function for last 7 days",
-      "Compare data transfer costs across regions",
+      "Why did my AWS bill increase last month?",
+      "What caused the spike in my S3 costs?",
+      "Which services have the highest cost growth?",
     ],
   },
 ];

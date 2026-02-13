@@ -118,6 +118,8 @@ class OllamaClient:
                         
                         if generated_text:
                             logger.info(f"Ollama response received successfully from {endpoint}")
+                            # Strip <think>...</think> blocks (DeepSeek-R1 reasoning)
+                            generated_text = re.sub(r'<think>.*?</think>', '', generated_text, flags=re.DOTALL).strip()
                             return generated_text
                         else:
                             logger.warning(f"Empty response from {endpoint}")
@@ -152,34 +154,116 @@ class OllamaClient:
         Returns:
             Dictionary with intent, time_period, filters, etc.
         """
-        system_prompt = """You are an AWS cost analysis assistant. Extract the intent and parameters from user queries about AWS costs.
+        from datetime import datetime as _dt
+        today_str = _dt.now().strftime("%Y-%m-%d")
 
-Respond ONLY with a valid JSON object (no markdown, no code blocks) with these fields:
-- intent: One of ["get_costs", "compare_costs", "forecast_costs", "get_breakdown"]
-- time_period: Describe the time period (e.g., "last month", "last 6 months")
-- start_date: Start date in YYYY-MM-DD format (if determinable)
-- end_date: End date in YYYY-MM-DD format (if determinable)
-- filters: Object with optional filters (service, region, account)
-- group_by: What to group by (SERVICE, REGION, LINKED_ACCOUNT, etc.)
-- comparison: For comparisons, object with baseline and comparison periods
+        system_prompt = f"""You are an AWS cost analysis assistant. Today's date is {today_str}.
+Extract the intent and parameters from user queries about AWS costs.
 
-Example:
-{"intent": "get_costs", "time_period": "last month", "group_by": "SERVICE"}"""
+Respond ONLY with a valid JSON object (no markdown, no code blocks, no extra text) with these fields:
+- intent: One of ["get_costs", "forecast_costs", "compare_costs", "get_cost_drivers"]
+- time_period: Human description (e.g. "last month", "last 6 months", "next quarter")
+- start_date: YYYY-MM-DD (compute from today). For historical queries use the first day of the relevant period. For forecasts set to today.
+- end_date: YYYY-MM-DD. For historical queries use the last day of the period. For forecasts set to a future date.
+- granularity: "MONTHLY" or "DAILY" (default MONTHLY; use DAILY for "last 7 days" or "daily breakdown")
+- filters: Object with optional keys: service (list of full AWS names), region (list), account (list)
+- group_by: Dimension key to group results by (see valid list below). Default "SERVICE".
+- comparison: ONLY for compare_costs / get_cost_drivers. Object with:
+    - baseline: {{"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}
+    - comparison: {{"start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}
+  Both periods MUST be exactly 1 calendar month, starting on day 1.
+  Example: baseline 2026-01-01→2026-02-01, comparison 2025-12-01→2026-01-01
+
+VALID group_by DIMENSION KEYS (use exactly as shown):
+SERVICE, REGION, INSTANCE_TYPE, INSTANCE_TYPE_FAMILY, LINKED_ACCOUNT,
+USAGE_TYPE, USAGE_TYPE_GROUP, OPERATION, PLATFORM, PURCHASE_TYPE,
+DATABASE_ENGINE, CACHE_ENGINE, DEPLOYMENT_OPTION, OPERATING_SYSTEM,
+AZ, TENANCY, RECORD_TYPE, BILLING_ENTITY, LEGAL_ENTITY_NAME, INVOICING_ENTITY
+
+INTENT RULES:
+- "get_costs": Any historical cost query (what did I spend, show costs, break down costs, top services)
+- "forecast_costs": Predicting future costs. Forecasts CANNOT be grouped. Do NOT set group_by for forecasts.
+- "compare_costs": Comparing two months side by side. Both periods must be exactly 1 month.
+- "get_cost_drivers": Why costs changed, what caused a spike, cost increase drivers. Both periods must be exactly 1 month.
+
+FORECAST RULES:
+- start_date = today ({today_str})
+- end_date MUST be in the future (after today)
+- For "next month": end_date = first day of the month after next month
+- For "next quarter": end_date = first day of 4th month from now
+- Do NOT include group_by for forecasts (the API does not support it)
+
+SERVICE NAME MAPPINGS (always use the full name in filters.service):
+S3 → "Amazon Simple Storage Service"
+EC2 → "Amazon Elastic Compute Cloud - Compute"
+RDS → "Amazon Relational Database Service"
+Lambda → "AWS Lambda"
+CloudFront → "Amazon CloudFront"
+DynamoDB → "Amazon DynamoDB"
+ECS → "Amazon Elastic Container Service"
+EKS → "Amazon Elastic Kubernetes Service"
+SQS → "Amazon Simple Queue Service"
+SNS → "Amazon Simple Notification Service"
+EBS → "Amazon Elastic Block Store"
+ElastiCache → "Amazon ElastiCache"
+Redshift → "Amazon Redshift"
+SageMaker → "Amazon SageMaker"
+Route 53 → "Amazon Route 53"
+CloudWatch → "Amazon CloudWatch"
+KMS → "AWS Key Management Service"
+Glue → "AWS Glue"
+Athena → "Amazon Athena"
+EMR → "Amazon EMR"
+Kinesis → "Amazon Kinesis"
+API Gateway → "Amazon API Gateway"
+OpenSearch → "Amazon OpenSearch Service"
+Step Functions → "AWS Step Functions"
+Secrets Manager → "AWS Secrets Manager"
+WAF → "AWS WAF"
+CodeBuild → "AWS CodeBuild"
+CodePipeline → "AWS CodePipeline"
+ECR → "Amazon EC2 Container Registry"
+Lightsail → "Amazon Lightsail"
+SES → "Amazon Simple Email Service"
+
+EXAMPLES:
+1. "What were my total AWS costs last month?"
+{{"intent":"get_costs","time_period":"last month","start_date":"2026-01-01","end_date":"2026-01-31","granularity":"MONTHLY","group_by":"SERVICE"}}
+
+2. "Show EC2 costs by region for the last full month"
+{{"intent":"get_costs","time_period":"last month","start_date":"2026-01-01","end_date":"2026-01-31","granularity":"MONTHLY","filters":{{"service":["Amazon Elastic Compute Cloud - Compute"]}},"group_by":"REGION"}}
+
+3. "Show RDS costs grouped by instance type"
+{{"intent":"get_costs","time_period":"last month","start_date":"2026-01-01","end_date":"2026-01-31","granularity":"MONTHLY","filters":{{"service":["Amazon Relational Database Service"]}},"group_by":"INSTANCE_TYPE"}}
+
+4. "Forecast total AWS costs for next month"
+{{"intent":"forecast_costs","time_period":"next month","start_date":"{today_str}","end_date":"2026-04-01"}}
+
+5. "What will my S3 costs be next month?"
+{{"intent":"forecast_costs","time_period":"next month","start_date":"{today_str}","end_date":"2026-04-01","filters":{{"service":["Amazon Simple Storage Service"]}}}}
+
+6. "Compare costs between last month and the month before"
+{{"intent":"compare_costs","time_period":"last 2 months","group_by":"SERVICE","comparison":{{"baseline":{{"start_date":"2025-12-01","end_date":"2026-01-01"}},"comparison":{{"start_date":"2026-01-01","end_date":"2026-02-01"}}}}}}
+
+7. "Why did my AWS bill increase last month?"
+{{"intent":"get_cost_drivers","time_period":"last 2 months","group_by":"SERVICE","comparison":{{"baseline":{{"start_date":"2025-12-01","end_date":"2026-01-01"}},"comparison":{{"start_date":"2026-01-01","end_date":"2026-02-01"}}}}}}
+
+8. "Show daily cost breakdown for current month"
+{{"intent":"get_costs","time_period":"current month","start_date":"2026-02-01","end_date":"{today_str}","granularity":"DAILY","group_by":"SERVICE"}}
+
+9. "Show Lambda costs for last 7 days"
+{{"intent":"get_costs","time_period":"last 7 days","start_date":"2026-02-05","end_date":"{today_str}","granularity":"DAILY","filters":{{"service":["AWS Lambda"]}},"group_by":"SERVICE"}}"""
         
-        prompt = f"User query: {user_query}\n\nExtract the intent and parameters:"
+        prompt = f"User query: {user_query}\n\nExtract the intent and parameters as JSON:"
         
-        response = await self.generate(prompt, system_prompt=system_prompt, temperature=0.3)
+        response = await self.generate(prompt, system_prompt=system_prompt, temperature=0.1)
         
         try:
             # Try to parse JSON from response
             response = response.strip()
             
-            # Strip <think>...</think> blocks (e.g., from DeepSeek models)
-            response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
-            
             # Remove markdown code blocks if present
             if response.startswith("```"):
-                # Extract content between code blocks
                 lines = response.split("\n")
                 response = "\n".join(lines[1:-1]) if len(lines) > 2 else response
                 response = response.replace("```json", "").replace("```", "").strip()
@@ -192,18 +276,30 @@ Example:
             except json.JSONDecodeError:
                 pass
             
-            # Fallback: find the first JSON object in the response
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response)
-            if json_match:
-                intent_data = json.loads(json_match.group())
-                logger.info(f"Extracted intent (regex fallback): {intent_data}")
-                return intent_data
+            # Fallback: find JSON object in the response (handles nested objects)
+            brace_depth = 0
+            start_idx = None
+            for i, ch in enumerate(response):
+                if ch == '{':
+                    if brace_depth == 0:
+                        start_idx = i
+                    brace_depth += 1
+                elif ch == '}':
+                    brace_depth -= 1
+                    if brace_depth == 0 and start_idx is not None:
+                        candidate = response[start_idx:i+1]
+                        try:
+                            intent_data = json.loads(candidate)
+                            logger.info(f"Extracted intent (brace-match fallback): {intent_data}")
+                            return intent_data
+                        except json.JSONDecodeError:
+                            start_idx = None
+                            continue
             
             raise json.JSONDecodeError("No JSON found", response, 0)
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse intent JSON: {response}")
-            # Return default intent
             return {
                 "intent": "get_costs",
                 "time_period": "last month",
