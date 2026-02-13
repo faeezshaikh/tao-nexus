@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from models import QueryRequest, QueryResponse, FinopsQueryRequest, FinopsResponse
 from agent_orchestrator import AgentOrchestrator
 from config import settings
+from aws_sso_refresh import ensure_sso_credentials, check_sso_status
 
 # Configure logging
 logging.basicConfig(
@@ -22,14 +23,68 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------------ #
+#  Background SSO token refresh                                       #
+# ------------------------------------------------------------------ #
+
+_refresh_task: asyncio.Task | None = None
+REFRESH_INTERVAL_SECONDS = 30 * 60  # 30 minutes
+
+
+async def _sso_refresh_loop():
+    """Background loop that keeps the SSO access token alive."""
+    while True:
+        await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+        try:
+            sso_region = settings.aws_region or "us-west-2"
+            ok = ensure_sso_credentials(sso_region)
+            if ok:
+                logger.info("Background SSO token refresh: ✅ credentials valid")
+            else:
+                logger.warning(
+                    "Background SSO token refresh: ❌ credentials could not be "
+                    "refreshed. Run: aws sso login --profile %s",
+                    settings.aws_profile or "default",
+                )
+        except Exception as e:
+            logger.error("Background SSO token refresh error: %s", e)
+
+
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
+    global _refresh_task
     logger.info("Starting FastAPI Agent")
     logger.info(f"Ollama URL: {settings.ollama_base_url}")
     logger.info(f"Ollama Model: {settings.ollama_model}")
+
+    # --- SSO credential check on startup ---
+    sso_region = settings.aws_region or "us-west-2"
+    ok = ensure_sso_credentials(sso_region)
+    if ok:
+        status = check_sso_status(sso_region)
+        logger.info("AWS SSO: %s", status["message"])
+    else:
+        logger.warning(
+            "⚠️  AWS SSO credentials are not valid. "
+            "Run: aws sso login --profile %s",
+            settings.aws_profile or "default",
+        )
+
+    # Start background refresh loop
+    _refresh_task = asyncio.create_task(_sso_refresh_loop())
+    logger.info("Started background SSO token refresh (every %d min)", REFRESH_INTERVAL_SECONDS // 60)
+
     yield
+
+    # Shutdown: cancel background task
+    if _refresh_task:
+        _refresh_task.cancel()
+        try:
+            await _refresh_task
+        except asyncio.CancelledError:
+            pass
     logger.info("Shutting down FastAPI Agent")
 
 
@@ -72,6 +127,19 @@ async def health_check():
         "ollama_url": settings.ollama_base_url,
         "ollama_model": settings.ollama_model
     }
+
+
+@app.get("/auth/status")
+async def auth_status():
+    """
+    Check the current AWS SSO credential status.
+
+    Returns token validity, expiry times, and whether auto-refresh
+    is available.
+    """
+    sso_region = settings.aws_region or "us-west-2"
+    status = check_sso_status(sso_region)
+    return status
 
 
 @app.post("/query", response_model=FinopsResponse)
