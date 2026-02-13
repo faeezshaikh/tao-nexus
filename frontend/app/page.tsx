@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { FinopsResponse } from "../types/finops";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { FinopsResponse, HistoryEntry } from "../types/finops";
 import { useAuth } from "../contexts/AuthContext";
 import { isAdmin } from "../lib/auth";
+import { saveHistoryEntry } from "../lib/history";
 import LoginPage from "../components/LoginPage";
 import Link from "next/link";
 import {
@@ -73,6 +75,18 @@ const PROMPT_CATALOG = [
 ];
 
 export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#FAFAFA] flex items-center justify-center">
+        <div className="text-2xl font-bold">Loading...</div>
+      </div>
+    }>
+      <HomeInner />
+    </Suspense>
+  );
+}
+
+function HomeInner() {
   const { user, logout, isLoading: authLoading } = useAuth();
   const [question, setQuestion] = useState("");
   const [data, setData] = useState<FinopsResponse | null>(null);
@@ -92,6 +106,13 @@ export default function Home() {
   >([]);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const searchParams = useSearchParams();
+
+  // Pre-fill from URL param (used by History "Run Again")
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q) setQuestion(q);
+  }, [searchParams]);
 
   // Show login page if not authenticated
   if (authLoading) {
@@ -161,6 +182,7 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      let currentEvent = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -170,7 +192,6 @@ export default function Home() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        let currentEvent = "";
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             currentEvent = line.slice(7).trim();
@@ -178,16 +199,38 @@ export default function Home() {
             const jsonStr = line.slice(6);
             try {
               const payload = JSON.parse(jsonStr);
+
+              // Detect result: explicit "result" event OR payload that looks like a FinopsResponse
+              const isResult =
+                currentEvent === "result" ||
+                (!currentEvent && payload && ("summary" in payload || "table" in payload || "chart" in payload));
+
               if (currentEvent === "progress") {
                 setProgressStatus(payload);
                 setCompletedSteps((prev) => {
                   if (prev.some((s) => s.step === payload.step)) return prev;
                   return [...prev, { step: payload.step, message: payload.message, emoji: payload.emoji }];
                 });
-              } else if (currentEvent === "result") {
-                setData(payload as FinopsResponse);
-                setThoughtMs(performance.now() - startedAt);
+              } else if (isResult) {
+                const resultData = payload as FinopsResponse;
+                setData(resultData);
+                const elapsed = performance.now() - startedAt;
+                setThoughtMs(elapsed);
+                // Persist to history
+                try {
+                  saveHistoryEntry({
+                    id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+                    query: queryToExecute,
+                    username: currentUsername,
+                    timestamp: new Date().toISOString(),
+                    durationMs: Math.round(elapsed),
+                    response: resultData,
+                  });
+                } catch (historyErr) {
+                  console.error("[History] Failed to save entry:", historyErr);
+                }
               }
+              currentEvent = "";
             } catch {
               // ignore malformed JSON
             }
@@ -317,6 +360,11 @@ export default function Home() {
       <div className="max-w-6xl mx-auto relative z-10">
         {/* User Info & Logout */}
         <div className="flex justify-end mb-4 gap-3">
+          <Link href="/history">
+            <button className="bg-[#B794F6] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
+              🕘 HISTORY
+            </button>
+          </Link>
           {isAdmin(user) && (
             <Link href="/analytics">
               <button className="bg-[#00FF94] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">

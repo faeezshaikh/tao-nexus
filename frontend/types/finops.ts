@@ -19,3 +19,12 @@ export type FinopsResponse = {
     chart: ChartData;
     summary: string;
 };
+
+export interface HistoryEntry {
+    id: string;
+    query: string;
+    username: string;
+    timestamp: string;      // ISO 8601
+    durationMs: number;
+    response: FinopsResponse;
+}
