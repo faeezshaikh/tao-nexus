@@ -13,6 +13,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from config import settings
+from aws_sso_refresh import ensure_sso_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +43,15 @@ class MCPClient:
     
     def __init__(self):
         self.session: Optional[ClientSession] = None
-        # Prepare environment variables for MCP server
+    
+    def _build_server_params(self) -> StdioServerParameters:
+        """Build fresh server params with current environment.
+        
+        Called before each connection so that refreshed SSO tokens
+        in the environment / cache are picked up by the subprocess.
+        """
         server_env = os.environ.copy()
         
-        # Explicitly set AWS credentials from settings if present
         if settings.aws_profile:
             server_env["AWS_PROFILE"] = settings.aws_profile
         if settings.aws_region:
@@ -55,7 +61,7 @@ class MCPClient:
         if settings.aws_secret_access_key:
             server_env["AWS_SECRET_ACCESS_KEY"] = settings.aws_secret_access_key
             
-        self.server_params = StdioServerParameters(
+        return StdioServerParameters(
             command=settings.mcp_server_command,
             args=settings.mcp_server_args.split(),
             env=server_env
@@ -63,8 +69,24 @@ class MCPClient:
     
     @asynccontextmanager
     async def connect(self):
-        """Context manager for MCP server connection."""
-        async with stdio_client(self.server_params) as (read, write):
+        """Context manager for MCP server connection.
+        
+        Ensures SSO credentials are fresh before spawning the
+        MCP subprocess.
+        """
+        # Refresh SSO credentials BEFORE launching the MCP subprocess
+        sso_region = settings.aws_region or "us-west-2"
+        profile = settings.aws_profile or "DtcReadOnly-017521386069"
+        ok = ensure_sso_credentials(sso_region, profile)
+        if not ok:
+            logger.error(
+                "SSO credentials could not be refreshed. "
+                "MCP connection may fail."
+            )
+        
+        # Build fresh server params (picks up refreshed cache)
+        server_params = self._build_server_params()
+        async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 self.session = session

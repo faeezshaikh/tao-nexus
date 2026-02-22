@@ -70,6 +70,8 @@ Enter the following values when prompted:
 Every day, you must login to refresh your credentials:
 ```powershell
 aws sso login --profile DtcReadOnly-017521386069
+
+aws sso login --profile DtcBillingReadOnly-307127115570
 ```
 
 ### 4. Configuration
