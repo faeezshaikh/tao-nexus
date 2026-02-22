@@ -8,6 +8,7 @@ import { isAdmin } from "../lib/auth";
 import { saveHistoryEntry } from "../lib/history";
 import LoginPage from "../components/LoginPage";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -647,7 +648,9 @@ function HomeInner() {
                   </span>
                 )}
               </div>
-              <p className="text-base leading-relaxed font-medium">{data.summary}</p>
+              <div className="prose-summary text-base leading-relaxed font-medium">
+                <ReactMarkdown>{data.summary}</ReactMarkdown>
+              </div>
             </div>
           )}
 

@@ -7,6 +7,7 @@ import { getHistory, clearHistory, deleteHistoryEntry } from "../../lib/history"
 import { HistoryEntry, FinopsResponse } from "../../types/finops";
 import LoginPage from "../../components/LoginPage";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import {
     Chart as ChartJS,
     CategoryScale,
@@ -329,8 +330,8 @@ export default function HistoryPage() {
                                                     }
                                                 }}
                                                 className={`absolute top-2 right-2 flex items-center gap-1 px-1.5 py-0.5 text-xs font-bold transition-all cursor-pointer border-2 ${isConfirmingDelete
-                                                        ? "bg-[#FF6B9D] text-[#0A0A0A] border-[#0A0A0A] opacity-100 shadow-[2px_2px_0px_#0A0A0A]"
-                                                        : "text-[#0A0A0A]/40 border-transparent hover:text-[#0A0A0A] hover:bg-[#FF6B9D]/30 hover:border-[#0A0A0A]/30 opacity-0 group-hover:opacity-100"
+                                                    ? "bg-[#FF6B9D] text-[#0A0A0A] border-[#0A0A0A] opacity-100 shadow-[2px_2px_0px_#0A0A0A]"
+                                                    : "text-[#0A0A0A]/40 border-transparent hover:text-[#0A0A0A] hover:bg-[#FF6B9D]/30 hover:border-[#0A0A0A]/30 opacity-0 group-hover:opacity-100"
                                                     }`}
                                                 title={isConfirmingDelete ? "Click again to confirm" : "Delete this entry"}
                                             >
@@ -405,9 +406,9 @@ export default function HistoryPage() {
                                                         {formatDuration(selectedEntry.durationMs)}
                                                     </span>
                                                 </div>
-                                                <p className="text-base leading-relaxed font-medium">
-                                                    {selectedEntry.response.summary}
-                                                </p>
+                                                <div className="prose-summary text-base leading-relaxed font-medium">
+                                                    <ReactMarkdown>{selectedEntry.response.summary}</ReactMarkdown>
+                                                </div>
                                             </div>
                                         )}
 
