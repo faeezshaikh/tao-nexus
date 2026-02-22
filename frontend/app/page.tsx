@@ -65,11 +65,43 @@ const PROMPT_CATALOG = [
     ],
   },
   {
-    category: "Anomalies",
+    category: "Anomaly Detection",
     prompts: [
+      "Were there any cost anomalies in the last 30 days?",
+      "What caused the unusual spending spike?",
       "Why did my AWS bill increase last month?",
-      "What caused the spike in my S3 costs?",
-      "Which services have the highest cost growth?",
+    ],
+  },
+  {
+    category: "Budget Monitoring",
+    prompts: [
+      "Am I on track with my AWS budgets?",
+      "Show my budget status and alerts",
+      "Which budgets are close to their limit?",
+    ],
+  },
+  {
+    category: "Free Tier",
+    prompts: [
+      "Am I about to exceed any free tier limits?",
+      "Show free tier usage across all services",
+      "Which services are closest to free tier caps?",
+    ],
+  },
+  {
+    category: "Savings Plans & RIs",
+    prompts: [
+      "What Savings Plans should I purchase?",
+      "Show my Reserved Instance coverage",
+      "What's my Savings Plans coverage percentage?",
+    ],
+  },
+  {
+    category: "Optimization",
+    prompts: [
+      "Which EC2 instances should I right-size?",
+      "Get Lambda optimization recommendations",
+      "Show idle resources I'm paying for",
     ],
   },
 ];

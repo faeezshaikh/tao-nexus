@@ -157,13 +157,13 @@ class OllamaClient:
         from datetime import datetime as _dt
         today_str = _dt.now().strftime("%Y-%m-%d")
 
-        system_prompt = f"""You are an AWS cost analysis assistant. Today's date is {today_str}.
-Extract the intent and parameters from user queries about AWS costs.
+        system_prompt = f"""You are an AWS cost and billing analysis assistant. Today's date is {today_str}.
+Extract the intent and parameters from user queries about AWS costs, budgets, optimization, and billing.
 
 Respond ONLY with a valid JSON object (no markdown, no code blocks, no extra text) with these fields:
-- intent: One of ["get_costs", "forecast_costs", "compare_costs", "get_cost_drivers"]
+- intent: One of ["get_costs", "forecast_costs", "compare_costs", "get_cost_drivers", "get_anomalies", "get_budgets", "get_free_tier", "get_ri_coverage", "get_ri_recommendations", "get_sp_recommendations", "get_sp_coverage", "get_optimization_recommendations", "get_idle_resources"]
 - time_period: Human description (e.g. "last month", "last 6 months", "next quarter")
-- start_date: YYYY-MM-DD (compute from today). For historical queries use the first day of the relevant period. For forecasts set to today.
+- start_date: YYYY-MM-DD (compute from today). For historical queries use the first day of the relevant period. For forecasts set to today. For intents that don't need dates (budgets, free tier, optimization, idle), default to last 3 months.
 - end_date: YYYY-MM-DD. For historical queries use the last day of the period. For forecasts set to a future date.
 - granularity: "MONTHLY" or "DAILY" (default MONTHLY; use DAILY for "last 7 days" or "daily breakdown")
 - filters: Object with optional keys: service (list of full AWS names), region (list), account (list)
@@ -185,6 +185,15 @@ INTENT RULES:
 - "forecast_costs": Predicting future costs. Forecasts CANNOT be grouped. Do NOT set group_by for forecasts.
 - "compare_costs": Comparing two months side by side. Both periods must be exactly 1 month.
 - "get_cost_drivers": Why costs changed, what caused a spike, cost increase drivers. Both periods must be exactly 1 month.
+- "get_anomalies": Cost anomalies, unusual spending, unexpected charges, spending spikes detected by AWS.
+- "get_budgets": Budget status, budget alerts, on track with budgets, budget limits.
+- "get_free_tier": Free tier usage, free tier limits, approaching free tier cap.
+- "get_ri_coverage": Reserved Instance coverage, RI coverage percentage, how much is covered by RIs.
+- "get_ri_recommendations": RI purchase recommendations, should I buy Reserved Instances.
+- "get_sp_recommendations": Savings Plans recommendations, should I buy a Savings Plan.
+- "get_sp_coverage": Savings Plans coverage, SP coverage percentage.
+- "get_optimization_recommendations": Right-sizing, optimization, over-provisioned, under-utilized resources. Use filters.service to target a specific service (EC2, Lambda, EBS, RDS, ECS).
+- "get_idle_resources": Idle resources, unused resources, resources I'm paying for but not using.
 
 FORECAST RULES:
 - start_date = today ({today_str})
@@ -233,26 +242,41 @@ EXAMPLES:
 2. "Show EC2 costs by region for the last full month"
 {{"intent":"get_costs","time_period":"last month","start_date":"2026-01-01","end_date":"2026-01-31","granularity":"MONTHLY","filters":{{"service":["Amazon Elastic Compute Cloud - Compute"]}},"group_by":"REGION"}}
 
-3. "Show RDS costs grouped by instance type"
-{{"intent":"get_costs","time_period":"last month","start_date":"2026-01-01","end_date":"2026-01-31","granularity":"MONTHLY","filters":{{"service":["Amazon Relational Database Service"]}},"group_by":"INSTANCE_TYPE"}}
-
-4. "Forecast total AWS costs for next month"
+3. "Forecast total AWS costs for next month"
 {{"intent":"forecast_costs","time_period":"next month","start_date":"{today_str}","end_date":"2026-04-01"}}
 
-5. "What will my S3 costs be next month?"
-{{"intent":"forecast_costs","time_period":"next month","start_date":"{today_str}","end_date":"2026-04-01","filters":{{"service":["Amazon Simple Storage Service"]}}}}
-
-6. "Compare costs between last month and the month before"
+4. "Compare costs between last month and the month before"
 {{"intent":"compare_costs","time_period":"last 2 months","group_by":"SERVICE","comparison":{{"baseline":{{"start_date":"2025-12-01","end_date":"2026-01-01"}},"comparison":{{"start_date":"2026-01-01","end_date":"2026-02-01"}}}}}}
 
-7. "Why did my AWS bill increase last month?"
+5. "Why did my AWS bill increase last month?"
 {{"intent":"get_cost_drivers","time_period":"last 2 months","group_by":"SERVICE","comparison":{{"baseline":{{"start_date":"2025-12-01","end_date":"2026-01-01"}},"comparison":{{"start_date":"2026-01-01","end_date":"2026-02-01"}}}}}}
 
-8. "Show daily cost breakdown for current month"
-{{"intent":"get_costs","time_period":"current month","start_date":"2026-02-01","end_date":"{today_str}","granularity":"DAILY","group_by":"SERVICE"}}
+6. "Were there any cost anomalies in the last 30 days?"
+{{"intent":"get_anomalies","time_period":"last 30 days","start_date":"2026-01-22","end_date":"{today_str}"}}
 
-9. "Show Lambda costs for last 7 days"
-{{"intent":"get_costs","time_period":"last 7 days","start_date":"2026-02-05","end_date":"{today_str}","granularity":"DAILY","filters":{{"service":["AWS Lambda"]}},"group_by":"SERVICE"}}"""
+7. "Am I on track with my AWS budgets?"
+{{"intent":"get_budgets","time_period":"current"}}
+
+8. "Am I about to exceed any free tier limits?"
+{{"intent":"get_free_tier","time_period":"current"}}
+
+9. "Show my Reserved Instance coverage"
+{{"intent":"get_ri_coverage","time_period":"last 3 months","start_date":"2025-11-01","end_date":"{today_str}"}}
+
+10. "What Savings Plans should I purchase?"
+{{"intent":"get_sp_recommendations","time_period":"current"}}
+
+11. "Which EC2 instances should I right-size?"
+{{"intent":"get_optimization_recommendations","time_period":"current","filters":{{"service":["Amazon Elastic Compute Cloud - Compute"]}}}}
+
+12. "Show idle resources I'm paying for"
+{{"intent":"get_idle_resources","time_period":"current"}}
+
+13. "Get Lambda optimization recommendations"
+{{"intent":"get_optimization_recommendations","time_period":"current","filters":{{"service":["AWS Lambda"]}}}}
+
+14. "Show daily cost breakdown for current month"
+{{"intent":"get_costs","time_period":"current month","start_date":"2026-02-01","end_date":"{today_str}","granularity":"DAILY","group_by":"SERVICE"}}"""
         
         prompt = f"User query: {user_query}\n\nExtract the intent and parameters as JSON:"
         

@@ -54,6 +54,69 @@ $body = @{
 Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
 ```
 
+### Query: Cost Anomalies
+```powershell
+$body = @{
+    query = "Were there any cost anomalies in the last 30 days?"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: Budget Status
+```powershell
+$body = @{
+    query = "Am I on track with my AWS budgets?"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: Free Tier Usage
+```powershell
+$body = @{
+    query = "Am I about to exceed any free tier limits?"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: Reserved Instance Coverage
+```powershell
+$body = @{
+    query = "Show my Reserved Instance coverage"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: Savings Plans Recommendations
+```powershell
+$body = @{
+    query = "What Savings Plans should I purchase?"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: EC2 Right-Sizing
+```powershell
+$body = @{
+    query = "Which EC2 instances should I right-size?"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
+### Query: Idle Resources
+```powershell
+$body = @{
+    query = "Show idle resources I'm paying for"
+} | ConvertTo-Json
+
+Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body -ContentType "application/json"
+```
+
 ## Using Python Test Script
 
 ```bash

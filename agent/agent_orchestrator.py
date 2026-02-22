@@ -334,6 +334,69 @@ class AgentOrchestrator:
         if intent == "get_cost_drivers":
             return await self._call_cost_drivers(intent_data, date_ranges, today, group_by, filter_expr)
         
+        # --- New intents from Billing & Cost Management MCP server --- #
+        if intent == "get_anomalies":
+            return await self.mcp_client.get_anomalies(
+                start_date=date_ranges.get("start_date"),
+                end_date=date_ranges.get("end_date"),
+            )
+        
+        if intent == "get_budgets":
+            return await self.mcp_client.describe_budgets()
+        
+        if intent == "get_free_tier":
+            return await self.mcp_client.get_free_tier_usage()
+        
+        if intent == "get_ri_coverage":
+            return await self.mcp_client.get_reservation_coverage(
+                start_date=date_ranges["start_date"],
+                end_date=date_ranges["end_date"],
+            )
+        
+        if intent == "get_ri_recommendations":
+            service = "Amazon Elastic Compute Cloud - Compute"
+            if filters.get("service"):
+                svc_list = filters["service"]
+                service = svc_list[0] if isinstance(svc_list, list) else svc_list
+            return await self.mcp_client.get_reservation_purchase_recommendation(
+                service=service,
+            )
+        
+        if intent == "get_sp_recommendations":
+            return await self.mcp_client.get_savings_plans_purchase_recommendation()
+        
+        if intent == "get_sp_coverage":
+            return await self.mcp_client.get_savings_plans_coverage(
+                start_date=date_ranges["start_date"],
+                end_date=date_ranges["end_date"],
+            )
+        
+        if intent == "get_optimization_recommendations":
+            # Map service filter to compute-optimizer operation name
+            operation = "get_ec2_instance_recommendations"  # default
+            svc = (filters.get("service") or [""])
+            svc_name = svc[0].lower() if isinstance(svc, list) and svc else ""
+            if "lambda" in svc_name:
+                operation = "get_lambda_function_recommendations"
+            elif "ebs" in svc_name or "block store" in svc_name:
+                operation = "get_ebs_volume_recommendations"
+            elif "rds" in svc_name or "relational" in svc_name:
+                operation = "get_rds_recommendations"
+            elif "ecs" in svc_name or "container service" in svc_name:
+                operation = "get_ecs_service_recommendations"
+            elif "auto scaling" in svc_name or "asg" in svc_name:
+                operation = "get_auto_scaling_group_recommendations"
+            return await self.mcp_client.get_compute_optimizer_recommendations(
+                operation=operation,
+            )
+        
+        if intent == "get_idle_resources":
+            # Idle / unused resource detection uses Cost Optimization Hub
+            import json as _json
+            return await self.mcp_client.list_optimization_recommendations(
+                filters=_json.dumps({"actionTypes": ["Stop", "Delete"]}),
+            )
+        
         # Default: get_costs / get_breakdown
         granularity = intent_data.get("granularity", "MONTHLY").upper()
         if granularity not in ("DAILY", "MONTHLY", "HOURLY"):
@@ -483,6 +546,35 @@ class AgentOrchestrator:
             filter_expression=filter_expr,
         )
 
+    async def _call_anomalies(self, date_ranges: Dict[str, str]) -> Dict[str, Any]:
+        """Call get_anomalies for cost anomaly detection."""
+        return await self.mcp_client.get_anomalies(
+            start_date=date_ranges["start_date"],
+            end_date=date_ranges["end_date"],
+        )
+
+    async def _call_optimization(self, intent_data: Dict) -> Dict[str, Any]:
+        """Route to the correct Compute Optimizer tool based on service filter."""
+        filters = intent_data.get("filters", {})
+        service_filter = ""
+        if filters.get("service"):
+            svc = filters["service"]
+            service_filter = (svc[0] if isinstance(svc, list) else svc).lower()
+        
+        if "lambda" in service_filter:
+            return await self.mcp_client.get_lambda_function_recommendations()
+        elif "ebs" in service_filter or "block store" in service_filter:
+            return await self.mcp_client.get_ebs_volume_recommendations()
+        elif "rds" in service_filter or "relational" in service_filter:
+            return await self.mcp_client.get_rds_database_recommendations()
+        elif "ecs" in service_filter or "container service" in service_filter:
+            return await self.mcp_client.get_ecs_service_recommendations()
+        elif "auto scaling" in service_filter or "asg" in service_filter:
+            return await self.mcp_client.get_auto_scaling_group_recommendations()
+        else:
+            # Default to EC2 recommendations
+            return await self.mcp_client.get_ec2_instance_recommendations()
+
     # ================================================================ #
     #  Filter Building                                                  #
     # ================================================================ #
@@ -562,6 +654,7 @@ class AgentOrchestrator:
     def _format_chart_data(self, mcp_results: Dict[str, Any], intent_data: Dict[str, Any]) -> List[ChartData]:
         """Format MCP results into chart data structures."""
         charts = []
+        intent = intent_data.get("intent", "get_costs")
         
         try:
             # Format 1: GroupedCosts (standard get_cost_and_usage response)
@@ -593,6 +686,10 @@ class AgentOrchestrator:
                 chart = self._chart_from_results_by_time(mcp_results["ResultsByTime"])
                 if chart:
                     charts.append(chart)
+            
+            # New intents — these mostly produce tables, but no charts
+            # (anomalies, budgets, free tier, RI/SP, optimization)
+            # Fall through gracefully — the UI will show the table + summary
                     
         except Exception as e:
             logger.error(f"Error formatting chart data: {str(e)}", exc_info=True)
@@ -826,6 +923,7 @@ class AgentOrchestrator:
     def _format_table_data(self, mcp_results: Dict[str, Any], intent_data: Dict[str, Any]) -> List[TableData]:
         """Format MCP results into table data structures."""
         tables = []
+        intent = intent_data.get("intent", "get_costs")
         
         try:
             if "GroupedCosts" in mcp_results:
@@ -850,6 +948,17 @@ class AgentOrchestrator:
             
             elif "ResultsByTime" in mcp_results:
                 table = self._table_from_results_by_time(mcp_results["ResultsByTime"])
+                if table:
+                    tables.append(table)
+            
+            # --- New intents: generic table from raw MCP response --- #
+            elif intent in (
+                "get_anomalies", "get_budgets", "get_free_tier",
+                "get_ri_coverage", "get_ri_recommendations",
+                "get_sp_recommendations", "get_sp_coverage",
+                "get_optimization_recommendations", "get_idle_resources",
+            ):
+                table = self._table_from_generic(mcp_results, intent)
                 if table:
                     tables.append(table)
                     
@@ -1047,6 +1156,132 @@ class AgentOrchestrator:
             rows=rows,
         )
 
+    def _table_from_generic(self, mcp_results: Any, intent: str) -> Optional[TableData]:
+        """Build a best-effort table from any MCP response for new tool types.
+        
+        Handles various response shapes by introspecting the data.
+        """
+        title_map = {
+            "get_anomalies": "Cost Anomalies",
+            "get_budgets": "Budget Status",
+            "get_free_tier": "Free Tier Usage",
+            "get_ri_coverage": "Reserved Instance Coverage",
+            "get_ri_recommendations": "RI Purchase Recommendations",
+            "get_sp_recommendations": "Savings Plans Recommendations",
+            "get_sp_coverage": "Savings Plans Coverage",
+            "get_optimization_recommendations": "Optimization Recommendations",
+            "get_idle_resources": "Idle Resources",
+        }
+        title = title_map.get(intent, "Results")
+        
+        if not mcp_results:
+            return None
+        
+        # If the result is a string, wrap it
+        if isinstance(mcp_results, str):
+            return TableData(
+                title=title,
+                columns=[ColumnDefinition(name="Result", type="string")],
+                rows=[{"Result": mcp_results[:500]}],
+            )
+        
+        # If the result is a dict, try to find a list inside it
+        data_list = None
+        if isinstance(mcp_results, dict):
+            # Look for common list keys
+            for key in [
+                "Anomalies", "anomalies",
+                "Budgets", "budgets",
+                "FreeTierUsages", "freeTierUsages", "free_tier_usages",
+                "CoveragesByTime", "coverages",
+                "Recommendations", "recommendations",
+                "UtilizationsByTime", "utilizations",
+                "results", "items", "data",
+            ]:
+                if key in mcp_results and isinstance(mcp_results[key], list):
+                    data_list = mcp_results[key]
+                    break
+            
+            # If no list found, try the first list value
+            if data_list is None:
+                for v in mcp_results.values():
+                    if isinstance(v, list) and len(v) > 0:
+                        data_list = v
+                        break
+            
+            # If still no list, treat the dict itself as a single row
+            if data_list is None:
+                data_list = [mcp_results]
+        elif isinstance(mcp_results, list):
+            data_list = mcp_results
+        else:
+            return None
+        
+        if not data_list:
+            return None
+        
+        # Build columns from the first item
+        first = data_list[0]
+        if not isinstance(first, dict):
+            return TableData(
+                title=title,
+                columns=[ColumnDefinition(name="Value", type="string")],
+                rows=[{"Value": str(item)[:200]} for item in data_list[:20]],
+            )
+        
+        # Flatten nested dicts one level for readability
+        def flatten(d: dict, prefix: str = "") -> dict:
+            out = {}
+            for k, v in d.items():
+                key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
+                if isinstance(v, dict):
+                    out.update(flatten(v, key))
+                elif isinstance(v, list):
+                    out[key] = str(v)[:100]
+                else:
+                    out[key] = v
+            return out
+        
+        flat_rows = [flatten(item) for item in data_list[:30]]
+        
+        # Collect all keys across all rows
+        all_keys = []
+        seen = set()
+        for row in flat_rows:
+            for k in row.keys():
+                if k not in seen:
+                    all_keys.append(k)
+                    seen.add(k)
+        
+        # Limit to 8 columns for readability
+        all_keys = all_keys[:8]
+        
+        columns = []
+        for k in all_keys:
+            # Guess type from first non-None value
+            sample = None
+            for row in flat_rows:
+                if k in row and row[k] is not None:
+                    sample = row[k]
+                    break
+            if isinstance(sample, (int, float)):
+                col_type = "number"
+            else:
+                col_type = "string"
+            columns.append(ColumnDefinition(name=k, type=col_type))
+        
+        rows = []
+        for row in flat_rows:
+            r = {}
+            for k in all_keys:
+                val = row.get(k, "")
+                if isinstance(val, float):
+                    val = round(val, 2)
+                r[k] = val
+            rows.append(r)
+        
+        return TableData(title=title, columns=columns, rows=rows)
+
     # ================================================================ #
     #  Finops Frontend Conversion                                       #
     # ================================================================ #
@@ -1093,7 +1328,7 @@ class AgentOrchestrator:
             logger.info(f"[stream] Extracted intent: {intent_data}")
 
             # Step 2: Connect to MCP
-            await report(2, "Connecting to AWS Cost Explorer…", "🔌")
+            await report(2, "Connecting to AWS Billing & Cost Management…", "🔌")
             async with self.mcp_client.connect():
                 today = await self._get_today(intent_data)
 
@@ -1112,6 +1347,15 @@ class AgentOrchestrator:
                     "forecast_costs": "get_cost_forecast",
                     "compare_costs": "get_cost_and_usage_comparisons",
                     "get_cost_drivers": "get_cost_comparison_drivers",
+                    "get_anomalies": "get_anomalies",
+                    "get_budgets": "describe_budgets",
+                    "get_free_tier": "get_free_tier_usage",
+                    "get_ri_coverage": "get_reservation_coverage",
+                    "get_ri_recommendations": "get_reservation_purchase_recommendation",
+                    "get_sp_recommendations": "get_savings_plans_purchase_recommendation",
+                    "get_sp_coverage": "get_savings_plans_coverage",
+                    "get_optimization_recommendations": "compute_optimizer",
+                    "get_idle_resources": "get_idle_recommendations",
                 }
                 tool_display = tool_name_map.get(intent, "get_cost_and_usage")
                 await report(5, f"Querying {tool_display}…", "⚡")
