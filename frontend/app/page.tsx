@@ -287,7 +287,7 @@ function HomeInner() {
   };
 
   const chartElement = (() => {
-    if (!data?.chart) return null;
+    if (!data?.chart || !data.chart.series || data.chart.series.length === 0) return null;
 
     const { x, series, type } = data.chart;
 
@@ -667,7 +667,7 @@ function HomeInner() {
           )}
 
           {/* Table */}
-          {data?.table && data.table.rows?.length > 0 && (
+          {data?.table && data.table.columns && data.table.rows && data.table.rows.length > 0 && (
             <div className="bg-white border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] p-5 overflow-x-auto">
               <h2 className="font-bold text-lg mb-4 uppercase tracking-wide bg-[#B794F6] inline-block px-3 py-1 border-2 border-[#0A0A0A]">
                 📋 Details
