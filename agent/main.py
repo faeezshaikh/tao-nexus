@@ -4,9 +4,12 @@ FastAPI Agent for AWS Cost Explorer MCP Server.
 import asyncio
 import json
 import logging
+import time
+from collections import deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -108,6 +111,35 @@ app.add_middleware(
 # Initialize orchestrator
 orchestrator = AgentOrchestrator()
 
+# ------------------------------------------------------------------ #
+#  In-memory analytics store                                          #
+# ------------------------------------------------------------------ #
+
+MAX_ANALYTICS_EVENTS = 500
+_analytics_events: deque = deque(maxlen=MAX_ANALYTICS_EVENTS)
+
+
+def _record_analytics_event(
+    *,
+    username: str,
+    query: str,
+    ip_address: str,
+    duration_ms: float,
+    success: bool,
+    error: str | None = None,
+) -> None:
+    """Append a query analytics event to the in-memory store."""
+    _analytics_events.appendleft({
+        "event_type": "query",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "username": username,
+        "ip_address": ip_address,
+        "query": query,
+        "duration_ms": round(duration_ms, 1),
+        "success": success,
+        "error": error,
+    })
+
 
 @app.get("/")
 async def root():
@@ -143,7 +175,7 @@ async def auth_status():
 
 
 @app.post("/query", response_model=FinopsResponse)
-async def query_finops(request: FinopsQueryRequest) -> FinopsResponse:
+async def query_finops(request: FinopsQueryRequest, raw_request: Request) -> FinopsResponse:
     """
     Process a user query for the TAO Lens frontend.
     
@@ -153,16 +185,35 @@ async def query_finops(request: FinopsQueryRequest) -> FinopsResponse:
     Returns:
         FinopsResponse matching the frontend contract
     """
+    client_ip = raw_request.client.host if raw_request.client else "unknown"
+    start = time.monotonic()
     try:
         logger.info(f"Received finops query: {request.question} from user: {request.username}")
         
         # Process query through orchestrator
         response = await orchestrator.process_finops_query(request.question, request.username)
         
+        duration_ms = (time.monotonic() - start) * 1000
+        _record_analytics_event(
+            username=request.username,
+            query=request.question,
+            ip_address=client_ip,
+            duration_ms=duration_ms,
+            success=True,
+        )
         logger.info("Finops query processed successfully")
         return response
         
     except Exception as e:
+        duration_ms = (time.monotonic() - start) * 1000
+        _record_analytics_event(
+            username=request.username,
+            query=request.question,
+            ip_address=client_ip,
+            duration_ms=duration_ms,
+            success=False,
+            error=str(e),
+        )
         logger.error(f"Error processing finops query: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
@@ -171,16 +222,20 @@ async def query_finops(request: FinopsQueryRequest) -> FinopsResponse:
 
 
 @app.post("/query/stream")
-async def query_finops_stream(request: FinopsQueryRequest):
+async def query_finops_stream(request: FinopsQueryRequest, raw_request: Request):
     """
     SSE streaming endpoint — sends real-time progress events while
     processing the query, then emits the final result.
     """
+    client_ip = raw_request.client.host if raw_request.client else "unknown"
     logger.info(f"Received streaming query: {request.question} from user: {request.username}")
 
     progress_queue: asyncio.Queue = asyncio.Queue()
 
     async def event_generator():
+        start = time.monotonic()
+        error_msg = None
+        success = True
         # Launch the orchestrator in a background task
         task = asyncio.create_task(
             orchestrator.process_finops_query_stream(
@@ -196,7 +251,22 @@ async def query_finops_stream(request: FinopsQueryRequest):
             yield f"event: progress\ndata: {json.dumps(event)}\n\n"
 
         # Await final result and send it
-        result = await task
+        try:
+            result = await task
+        except Exception as e:
+            success = False
+            error_msg = str(e)
+            raise
+        finally:
+            duration_ms = (time.monotonic() - start) * 1000
+            _record_analytics_event(
+                username=request.username,
+                query=request.question,
+                ip_address=client_ip,
+                duration_ms=duration_ms,
+                success=success,
+                error=error_msg,
+            )
         yield f"event: result\ndata: {result.model_dump_json()}\n\n"
 
     return StreamingResponse(
@@ -207,6 +277,48 @@ async def query_finops_stream(request: FinopsQueryRequest):
             "X-Accel-Buffering": "no",  # disable nginx buffering
         },
     )
+
+
+# ------------------------------------------------------------------ #
+#  Analytics endpoint                                                  #
+# ------------------------------------------------------------------ #
+
+@app.get("/analytics")
+async def get_analytics(
+    username: str | None = Query(None, description="Filter events by username"),
+    limit: int = Query(100, ge=1, le=500, description="Max events to return"),
+):
+    """
+    Return recorded analytics events and summary statistics.
+    Supports optional username filter and limit.
+    """
+    events = list(_analytics_events)
+
+    # Apply username filter
+    if username:
+        events = [e for e in events if e["username"] == username]
+
+    # Trim to limit
+    events = events[:limit]
+
+    # Compute summary
+    total = len(events)
+    successful = sum(1 for e in events if e["success"])
+    failed = total - successful
+    durations = [e["duration_ms"] for e in events if e["success"]]
+    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
+    unique_users = len({e["username"] for e in events})
+
+    return {
+        "events": events,
+        "summary": {
+            "total_queries": total,
+            "successful_queries": successful,
+            "failed_queries": failed,
+            "avg_query_duration_ms": avg_duration,
+            "unique_users": unique_users,
+        },
+    }
 
 
 @app.post("/api/query", response_model=QueryResponse)
