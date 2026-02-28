@@ -420,11 +420,11 @@ class AgentOrchestrator:
         """Call get_cost_forecast with correct date handling.
         
         MCP server requires:
-        - start_date <= today
-        - end_date must be in the future (after today)
+        - start_date = tomorrow (first day without complete data)
+        - end_date must be in the future (after start_date)
         """
-        # start_date = today
-        start_date = today.strftime("%Y-%m-%d")
+        # start_date = tomorrow (AWS needs the first incomplete day)
+        start_date = (today + timedelta(days=1)).strftime("%Y-%m-%d")
         
         # Calculate forecast end based on the LLM's end_date or time_period
         end_date = None
