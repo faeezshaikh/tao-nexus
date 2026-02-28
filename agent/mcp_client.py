@@ -120,7 +120,9 @@ class MCPClient:
             raise
 
     # ================================================================== #
-    #  Cost Explorer Tools (existing, preserved)                          #
+    #  Cost Explorer  (tool: "cost-explorer")                              #
+    #  All operations go through the unified "cost-explorer" tool          #
+    #  with an "operation" parameter.                                      #
     # ================================================================== #
 
     async def get_today_date(self) -> Dict[str, str]:
@@ -134,11 +136,10 @@ class MCPClient:
         dimension: str,
     ) -> Dict[str, Any]:
         """Get valid values for a dimension (e.g. SERVICE, REGION)."""
-        return await self.call_tool("get_dimension_values", {
-            "date_range": {
-                "start_date": start_date,
-                "end_date": end_date,
-            },
+        return await self.call_tool("cost-explorer", {
+            "operation": "getDimensionValues",
+            "start_date": start_date,
+            "end_date": end_date,
             "dimension": dimension,
         })
 
@@ -153,18 +154,17 @@ class MCPClient:
     ) -> Dict[str, Any]:
         """Retrieve AWS cost and usage data."""
         arguments: Dict[str, Any] = {
-            "date_range": {
-                "start_date": start_date,
-                "end_date": end_date,
-            },
+            "operation": "getCostAndUsage",
+            "start_date": start_date,
+            "end_date": end_date,
             "granularity": granularity,
-            "group_by": group_by,
-            "metric": metric,
+            "group_by": json.dumps([{"Type": "DIMENSION", "Key": group_by}]),
+            "metrics": json.dumps([metric]),
         }
         if filter_expression:
-            arguments["filter_expression"] = filter_expression
+            arguments["filter"] = json.dumps(filter_expression)
         
-        return await self.call_tool("get_cost_and_usage", arguments)
+        return await self.call_tool("cost-explorer", arguments)
 
     async def get_cost_forecast(
         self,
@@ -177,18 +177,21 @@ class MCPClient:
     ) -> Dict[str, Any]:
         """Retrieve AWS cost forecasts."""
         arguments: Dict[str, Any] = {
-            "date_range": {
-                "start_date": start_date,
-                "end_date": end_date,
-            },
+            "operation": "getCostForecast",
+            "start_date": start_date,
+            "end_date": end_date,
             "granularity": granularity,
             "metric": metric,
             "prediction_interval_level": prediction_interval_level,
         }
         if filter_expression:
-            arguments["filter_expression"] = filter_expression
+            arguments["filter"] = json.dumps(filter_expression)
         
-        return await self.call_tool("get_cost_forecast", arguments)
+        return await self.call_tool("cost-explorer", arguments)
+
+    # ================================================================== #
+    #  Cost Comparison  (tool: "cost-comparison")                          #
+    # ================================================================== #
 
     async def get_cost_and_usage_comparisons(
         self,
@@ -202,21 +205,18 @@ class MCPClient:
     ) -> Dict[str, Any]:
         """Compare AWS costs between two time periods."""
         arguments: Dict[str, Any] = {
-            "baseline_date_range": {
-                "start_date": baseline_start,
-                "end_date": baseline_end,
-            },
-            "comparison_date_range": {
-                "start_date": comparison_start,
-                "end_date": comparison_end,
-            },
+            "operation": "getCostAndUsageComparisons",
+            "baseline_start_date": baseline_start,
+            "baseline_end_date": baseline_end,
+            "comparison_start_date": comparison_start,
+            "comparison_end_date": comparison_end,
             "metric_for_comparison": metric_for_comparison,
-            "group_by": group_by,
+            "group_by": json.dumps([{"Type": "DIMENSION", "Key": group_by}]),
         }
         if filter_expression:
-            arguments["filter_expression"] = filter_expression
+            arguments["filter"] = json.dumps(filter_expression)
         
-        return await self.call_tool("get_cost_and_usage_comparisons", arguments)
+        return await self.call_tool("cost-comparison", arguments)
 
     async def get_cost_comparison_drivers(
         self,
@@ -230,21 +230,18 @@ class MCPClient:
     ) -> Dict[str, Any]:
         """Analyze top 10 cost change drivers between two periods."""
         arguments: Dict[str, Any] = {
-            "baseline_date_range": {
-                "start_date": baseline_start,
-                "end_date": baseline_end,
-            },
-            "comparison_date_range": {
-                "start_date": comparison_start,
-                "end_date": comparison_end,
-            },
+            "operation": "getCostComparisonDrivers",
+            "baseline_start_date": baseline_start,
+            "baseline_end_date": baseline_end,
+            "comparison_start_date": comparison_start,
+            "comparison_end_date": comparison_end,
             "metric_for_comparison": metric_for_comparison,
-            "group_by": group_by,
+            "group_by": json.dumps([{"Type": "DIMENSION", "Key": group_by}]),
         }
         if filter_expression:
-            arguments["filter_expression"] = filter_expression
+            arguments["filter"] = json.dumps(filter_expression)
         
-        return await self.call_tool("get_cost_comparison_drivers", arguments)
+        return await self.call_tool("cost-comparison", arguments)
 
     async def get_tag_values(
         self,
@@ -253,11 +250,10 @@ class MCPClient:
         tag_key: str,
     ) -> Dict[str, Any]:
         """Get valid values for a specific tag key."""
-        return await self.call_tool("get_tag_values", {
-            "date_range": {
-                "start_date": start_date,
-                "end_date": end_date,
-            },
+        return await self.call_tool("cost-explorer", {
+            "operation": "getTagValues",
+            "start_date": start_date,
+            "end_date": end_date,
             "tag_key": tag_key,
         })
 
