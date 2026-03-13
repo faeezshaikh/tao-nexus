@@ -1,6 +1,6 @@
 // Frontend analytics tracking utilities
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.103.30.81:8000";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.103.30.34:8000";
 
 export interface AnalyticsEvent {
     event_type: "query";

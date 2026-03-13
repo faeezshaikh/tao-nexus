@@ -50,6 +50,7 @@ Install dependencies (this includes the MCP server):
 
 ```powershell
 pip install -r requirements.txt
+pip install uv
 pip install awslabs.cost-explorer-mcp-server
 ```
 
