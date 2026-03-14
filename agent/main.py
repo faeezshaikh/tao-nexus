@@ -17,6 +17,7 @@ from models import QueryRequest, QueryResponse, FinopsQueryRequest, FinopsRespon
 from agent_orchestrator import AgentOrchestrator
 from config import settings
 from aws_sso_refresh import ensure_sso_credentials, check_sso_status
+from nexus.router import router as nexus_router
 
 # Configure logging
 logging.basicConfig(
@@ -110,6 +111,9 @@ app.add_middleware(
 
 # Initialize orchestrator
 orchestrator = AgentOrchestrator()
+
+# Register TAO Nexus router
+app.include_router(nexus_router)
 
 # ------------------------------------------------------------------ #
 #  In-memory analytics store                                          #
