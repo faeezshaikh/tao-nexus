@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/nexus", tags=["TAO Nexus"])
 
 # Singleton service instance
-_service = NexusService(use_mock=True)
+_service = NexusService()
 
 
 @router.get("/health")

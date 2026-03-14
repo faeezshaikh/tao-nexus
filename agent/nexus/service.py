@@ -44,6 +44,13 @@ from .providers.mock import (
     MockForecastProvider,
     MockOptimizationProvider,
 )
+from .providers.mcp import (
+    MCPAnomalyProvider,
+    MCPCommitmentAdvisor,
+    MCPCostDataProvider,
+    MCPForecastProvider,
+    MCPOptimizationProvider,
+)
 from .llm import NexusLLM
 
 logger = logging.getLogger(__name__)
@@ -59,16 +66,14 @@ CHART_COLORS = [
 class NexusService:
     """Orchestrates the end-to-end Nexus analysis pipeline."""
 
-    def __init__(self, *, use_mock: bool = True):
-        self.use_mock = use_mock
+    def __init__(self, *, use_mock: Optional[bool] = None):
+        if use_mock is None:
+            from config import settings
+            self.use_mock = settings.nexus_mock_mode
+        else:
+            self.use_mock = use_mock
 
-        # Initialize providers (mock for now)
-        self.cost_provider = MockCostDataProvider()
-        self.forecast_provider = MockForecastProvider()
-        self.optimization_provider = MockOptimizationProvider()
-        self.anomaly_provider = MockAnomalyProvider()
-        self.commitment_advisor = MockCommitmentAdvisor()
-        self.llm = NexusLLM(use_mock=use_mock)
+        self.llm = NexusLLM(use_mock=self.use_mock)
 
         # In-memory session store
         self._sessions: Dict[str, List[Dict[str, str]]] = {}
@@ -85,6 +90,27 @@ class NexusService:
             session_id = ""  # will be auto-generated in response
             conversation = []
 
+        if self.use_mock:
+            self.cost_provider = MockCostDataProvider()
+            self.forecast_provider = MockForecastProvider()
+            self.optimization_provider = MockOptimizationProvider()
+            self.anomaly_provider = MockAnomalyProvider()
+            self.commitment_advisor = MockCommitmentAdvisor()
+            return await self._run_analysis_pipeline(request, session_id, start)
+        else:
+            from mcp_client import MCPClient
+            mcp = MCPClient()
+            async with mcp.connect():
+                self.cost_provider = MCPCostDataProvider(mcp)
+                self.forecast_provider = MCPForecastProvider(mcp)
+                self.optimization_provider = MCPOptimizationProvider(mcp)
+                self.anomaly_provider = MCPAnomalyProvider(mcp)
+                self.commitment_advisor = MCPCommitmentAdvisor(mcp)
+                return await self._run_analysis_pipeline(request, session_id, start)
+
+    async def _run_analysis_pipeline(
+        self, request: NexusAnalyzeRequest, session_id: str, start: float
+    ) -> NexusAnalyzeResponse:
         # 2. Parse target from query
         target_pct = self._extract_savings_target(request.query)
 
@@ -394,8 +420,13 @@ class NexusService:
 
         all_labels = trend_labels + forecast_labels
         historical_padded = trend_values + [None] * len(forecast_labels)
-        forecast_padded = [None] * (len(trend_labels) - 1) + [trend_values[-1]] + forecast_values
-        adjusted_padded = [None] * (len(trend_labels) - 1) + [trend_values[-1]] + adjusted_values
+
+        if trend_values:
+            forecast_padded = [None] * (len(trend_labels) - 1) + [trend_values[-1]] + forecast_values
+            adjusted_padded = [None] * (len(trend_labels) - 1) + [trend_values[-1]] + adjusted_values
+        else:
+            forecast_padded = forecast_values
+            adjusted_padded = adjusted_values
 
         charts.append(ChartSpec(
             type=ChartType.LINE,
