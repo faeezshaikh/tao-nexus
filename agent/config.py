@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     aws_profile: Optional[str] = os.getenv("AWS_PROFILE", None)
     aws_access_key_id: Optional[str] = os.getenv("AWS_ACCESS_KEY_ID", None)
     aws_secret_access_key: Optional[str] = os.getenv("AWS_SECRET_ACCESS_KEY", None)
+    aws_session_token: Optional[str] = os.getenv("AWS_SESSION_TOKEN", None)
+    aws_target_role_arn: Optional[str] = os.getenv("AWS_TARGET_ROLE_ARN", None)
 
     # Nexus Configuration
     nexus_mock_mode: bool = os.getenv("NEXUS_MOCK_MODE", "true").lower() == "true"

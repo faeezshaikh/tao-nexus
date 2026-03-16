@@ -17,7 +17,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from config import settings
-from aws_sso_refresh import ensure_sso_credentials
+import boto3
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ class MCPClient:
             server_env["AWS_ACCESS_KEY_ID"] = settings.aws_access_key_id
         if settings.aws_secret_access_key:
             server_env["AWS_SECRET_ACCESS_KEY"] = settings.aws_secret_access_key
+        if getattr(settings, "aws_session_token", None):
+            server_env["AWS_SESSION_TOKEN"] = settings.aws_session_token
         
         # Set FASTMCP_LOG_LEVEL to reduce noise from the MCP server
         server_env.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
@@ -78,20 +80,29 @@ class MCPClient:
     async def connect(self):
         """Context manager for MCP server connection.
         
-        Ensures SSO credentials are fresh before spawning the
+        Assumes the cross account role via STS before spawning the
         MCP subprocess.
         """
-        # Refresh SSO credentials BEFORE launching the MCP subprocess
-        sso_region = settings.aws_region or "us-west-2"
-        profile = settings.aws_profile or "DtcReadOnly-017521386069"
-        ok = ensure_sso_credentials(sso_region, profile)
-        if not ok:
-            logger.error(
-                "SSO credentials could not be refreshed. "
-                "MCP connection may fail."
-            )
+        # Assume cross-account role BEFORE launching the MCP subprocess
+        if hasattr(settings, "aws_target_role_arn") and settings.aws_target_role_arn:
+            try:
+                logger.info(f"Assuming target role: {settings.aws_target_role_arn}")
+                sts_client = boto3.client('sts')
+                assumed_role = sts_client.assume_role(
+                    RoleArn=settings.aws_target_role_arn,
+                    RoleSessionName="TaoNexusMCPSession"
+                )
+                credentials = assumed_role['Credentials']
+                settings.aws_access_key_id = credentials['AccessKeyId']
+                settings.aws_secret_access_key = credentials['SecretAccessKey']
+                settings.aws_session_token = credentials['SessionToken']
+                logger.info("Successfully acquired temporary credentials")
+            except Exception as e:
+                logger.error(f"Failed to assume target role: {e}")
+        else:
+            logger.warning("AWS_TARGET_ROLE_ARN not set, proceeding with default credentials")
         
-        # Build fresh server params (picks up refreshed cache)
+        # Build fresh server params (picks up refreshed credentials)
         server_params = self._build_server_params()
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:

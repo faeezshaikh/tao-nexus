@@ -54,28 +54,8 @@ pip install uv
 pip install awslabs.cost-explorer-mcp-server
 ```
 
-### 3. AWS Authentication (SSO)
-The agent uses your local AWS credentials. Configure SSO login:
-
-```powershell
-aws configure sso
-```
-
-Enter the following values when prompted:
-*   **SSO start URL**: `http://d-9267957955.awsapps.com/start/#/?container=aws`
-*   **SSO Region**: `us-west-2`
-*   **SSO registration scopes**: [Leave default]
-*   **CLI Profile Name**: `financial-profile` (or any name you prefer)
-
-**Login to AWS:**
-Every day, you must login to refresh your credentials:
-```powershell
-aws sso login --profile DtcReadOnly-017521386069
-
-aws sso login --profile DtcBillingReadOnly-307127115570
-
-aws sso login --profile DtcAdministrator-625841516407
-```
+### 3. AWS Authentication (EC2 Instance Profile)
+The agent automatically uses the EC2 instance profile to authenticate with AWS. It then uses the STS `AssumeRole` API to securely obtain temporary credentials for the `AWS_TARGET_ROLE_ARN` specified in your `.env` file. You do not need to manually configure or refresh SSO sessions on the server.
 
 ### 4. Configuration
 Create a `.env` file in the `agent` directory:
@@ -91,9 +71,9 @@ OLLAMA_TIMEOUT=120
 MCP_SERVER_COMMAND=C:\Users\fshaikh\finops\agent\.venv\Scripts\python.exe
 MCP_SERVER_ARGS=-m awslabs.cost_explorer_mcp_server.server
 
-# AWS Credentials (optional, if not using default profile)
-AWS_PROFILE=financial-profile
-AWS_REGION=us-east-1
+# AWS Credentials
+AWS_REGION=us-west-2
+AWS_TARGET_ROLE_ARN=arn:aws:iam::307127115570:role/tao-billing-readonly-cross-account-role
 
 # API Configuration
 API_HOST=0.0.0.0
@@ -145,8 +125,8 @@ Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body 
 
 **"Access Denied" / "Connection Closed" Errors:**
 *   Ensure you are using the full path to `python.exe` in `MCP_SERVER_COMMAND`.
-*   Verify you have run `aws sso login`.
-*   Ensure `awslabs.cost-explorer-mcp-server` is installed in your `.venv`.
+*   Verify the EC2 instance profile has permission to `AssumeRole` on the target cross-account role.
+*   Check the `AWS_TARGET_ROLE_ARN` in your `.env` file.
 
 **"Model not found" Error:**
 *   Check `OLLAMA_MODEL` in `.env`. It should be `qwen2.5-coder:7b`.
