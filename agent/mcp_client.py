@@ -11,7 +11,7 @@ Supports all tools from awslabs/billing-cost-management-mcp-server including:
 import logging
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from contextlib import asynccontextmanager
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -48,25 +48,76 @@ class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
     
-    def _build_server_params(self) -> StdioServerParameters:
+    def _build_base_boto3_session(self) -> boto3.Session:
+        """Build a boto3 session from explicit keys, SSO profile, or the default chain."""
+        session_kwargs: Dict[str, Any] = {}
+
+        if settings.aws_region:
+            session_kwargs["region_name"] = settings.aws_region
+
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+            session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+            if getattr(settings, "aws_session_token", None):
+                session_kwargs["aws_session_token"] = settings.aws_session_token
+        elif settings.aws_profile:
+            session_kwargs["profile_name"] = settings.aws_profile
+
+        return boto3.Session(**session_kwargs)
+
+    def _resolve_mcp_credentials(self) -> Dict[str, str]:
+        """Resolve credentials for the MCP subprocess.
+
+        If a target role is configured, assume it using whichever credential source
+        boto3 resolves first: explicit env keys, AWS_PROFILE-backed SSO, or the EC2
+        instance profile. If no target role is configured, the subprocess will rely
+        on the inherited environment / profile directly.
+        """
+        if not settings.aws_target_role_arn:
+            logger.info("AWS_TARGET_ROLE_ARN not set, using base AWS credential chain")
+            return {}
+
+        logger.info(
+            "Assuming target role %s using %s",
+            settings.aws_target_role_arn,
+            f"AWS profile '{settings.aws_profile}'" if settings.aws_profile else "default AWS credential chain",
+        )
+        session = self._build_base_boto3_session()
+        sts_client = session.client("sts")
+        assumed_role = sts_client.assume_role(
+            RoleArn=settings.aws_target_role_arn,
+            RoleSessionName="TaoNexusMCPSession",
+        )
+        credentials = assumed_role["Credentials"]
+        logger.info("Successfully acquired temporary credentials for MCP server")
+        return {
+            "AWS_ACCESS_KEY_ID": credentials["AccessKeyId"],
+            "AWS_SECRET_ACCESS_KEY": credentials["SecretAccessKey"],
+            "AWS_SESSION_TOKEN": credentials["SessionToken"],
+        }
+
+    def _build_server_params(self, credential_overrides: Optional[Dict[str, str]] = None) -> StdioServerParameters:
         """Build fresh server params with current environment.
-        
-        Called before each connection so that refreshed SSO tokens
-        in the environment / cache are picked up by the subprocess.
+
+        Called before each connection so refreshed SSO tokens in the local AWS cache
+        or freshly-assumed role credentials are picked up by the subprocess.
         """
         server_env = os.environ.copy()
-        
+
         if settings.aws_profile:
             server_env["AWS_PROFILE"] = settings.aws_profile
         if settings.aws_region:
             server_env["AWS_REGION"] = settings.aws_region
+            server_env["AWS_DEFAULT_REGION"] = settings.aws_region
         if settings.aws_access_key_id:
             server_env["AWS_ACCESS_KEY_ID"] = settings.aws_access_key_id
         if settings.aws_secret_access_key:
             server_env["AWS_SECRET_ACCESS_KEY"] = settings.aws_secret_access_key
         if getattr(settings, "aws_session_token", None):
             server_env["AWS_SESSION_TOKEN"] = settings.aws_session_token
-        
+        if credential_overrides:
+            server_env.update(credential_overrides)
+
         # Set FASTMCP_LOG_LEVEL to reduce noise from the MCP server
         server_env.setdefault("FASTMCP_LOG_LEVEL", "ERROR")
             
@@ -83,27 +134,15 @@ class MCPClient:
         Assumes the cross account role via STS before spawning the
         MCP subprocess.
         """
-        # Assume cross-account role BEFORE launching the MCP subprocess
-        if hasattr(settings, "aws_target_role_arn") and settings.aws_target_role_arn:
-            try:
-                logger.info(f"Assuming target role: {settings.aws_target_role_arn}")
-                sts_client = boto3.client('sts')
-                assumed_role = sts_client.assume_role(
-                    RoleArn=settings.aws_target_role_arn,
-                    RoleSessionName="TaoNexusMCPSession"
-                )
-                credentials = assumed_role['Credentials']
-                settings.aws_access_key_id = credentials['AccessKeyId']
-                settings.aws_secret_access_key = credentials['SecretAccessKey']
-                settings.aws_session_token = credentials['SessionToken']
-                logger.info("Successfully acquired temporary credentials")
-            except Exception as e:
-                logger.error(f"Failed to assume target role: {e}")
-        else:
-            logger.warning("AWS_TARGET_ROLE_ARN not set, proceeding with default credentials")
-        
+        credential_overrides: Dict[str, str] = {}
+        try:
+            credential_overrides = self._resolve_mcp_credentials()
+        except Exception as e:
+            logger.error(f"Failed to prepare AWS credentials for MCP server: {e}")
+            raise
+
         # Build fresh server params (picks up refreshed credentials)
-        server_params = self._build_server_params()
+        server_params = self._build_server_params(credential_overrides)
         async with stdio_client(server_params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()

@@ -193,7 +193,7 @@ function HomeInner() {
       setElapsedSeconds(Math.floor((performance.now() - startedAt) / 1000));
     }, 1000);
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://10.103.30.34:8000";
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
     try {
       const res = await fetch(`${API_URL}/query/stream`, {

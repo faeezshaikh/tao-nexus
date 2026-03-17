@@ -54,8 +54,39 @@ pip install uv
 pip install awslabs.cost-explorer-mcp-server
 ```
 
-### 3. AWS Authentication (EC2 Instance Profile)
-The agent automatically uses the EC2 instance profile to authenticate with AWS. It then uses the STS `AssumeRole` API to securely obtain temporary credentials for the `AWS_TARGET_ROLE_ARN` specified in your `.env` file. You do not need to manually configure or refresh SSO sessions on the server.
+### 3. AWS Authentication
+The agent supports two authentication modes:
+
+#### Mode A: EC2 instance profile
+Use this when the app is running on an EC2 instance that already has an attached IAM role / instance profile.
+
+How it works:
+*   boto3 automatically uses the EC2 instance profile.
+*   If `AWS_TARGET_ROLE_ARN` is set, the agent calls STS `AssumeRole` with those instance-profile credentials before launching the MCP server.
+*   The MCP server then uses the temporary credentials for billing queries.
+
+What to do:
+*   Leave `AWS_PROFILE` unset.
+*   Keep `AWS_TARGET_ROLE_ARN` set if you need to read billing data through a cross-account role.
+
+#### Mode B: AWS SSO profile
+Use this when the app is running on a machine that does not have an EC2 instance profile.
+
+How it works:
+*   You configure an AWS CLI SSO profile once.
+*   You run `aws sso login --profile <profile-name>`.
+*   You set `AWS_PROFILE=<profile-name>` before starting the agent.
+*   boto3 uses the cached SSO session.
+*   If `AWS_TARGET_ROLE_ARN` is set, the agent assumes that target role using the SSO-backed session.
+
+One-time setup:
+
+```powershell
+aws configure sso --profile my-sso-profile
+aws sso login --profile my-sso-profile
+```
+
+When the SSO session expires, run the login command again.
 
 ### 4. Configuration
 Create a `.env` file in the `agent` directory:
@@ -73,6 +104,8 @@ MCP_SERVER_ARGS=-m awslabs.cost_explorer_mcp_server.server
 
 # AWS Credentials
 AWS_REGION=us-west-2
+# Leave this unset on EC2. Set it only when using AWS SSO on a non-EC2 machine.
+#AWS_PROFILE=my-sso-profile
 AWS_TARGET_ROLE_ARN=arn:aws:iam::307127115570:role/tao-billing-readonly-cross-account-role
 
 # API Configuration
@@ -94,6 +127,19 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 You should see logs indicating successful startup and connection to Ollama.
+
+### Which mode should I use?
+Use EC2 instance profile mode when the app is deployed on EC2 and the instance already has permission to reach the billing account or assume the target billing role.
+
+Use AWS SSO mode when the app is running anywhere else. In that case:
+
+```powershell
+aws sso login --profile my-sso-profile
+
+aws sso login  --profile DtcBillingReadOnly-307127115570
+```
+
+Then make sure `AWS_PROFILE=my-sso-profile` is set before you start the agent.
 
 ## Health Check
 
@@ -125,7 +171,18 @@ Invoke-WebRequest -Uri http://localhost:8000/api/query -Method POST -Body $body 
 
 **"Access Denied" / "Connection Closed" Errors:**
 *   Ensure you are using the full path to `python.exe` in `MCP_SERVER_COMMAND`.
-*   Verify the EC2 instance profile has permission to `AssumeRole` on the target cross-account role.
+*   If running on EC2, verify the instance profile has permission to `AssumeRole` on the target cross-account role.
+*   If running outside EC2, verify `AWS_PROFILE` matches the profile you used with `aws sso login`.
+```
+aws configure sso
+SSO session name (Recommended): tao
+SSO start URL [None]: http://d-9267957955.awsapps.com/start/#/?container=aws
+SSO region [None]: us-west-2
+SSO registration scopes [sso:account:access]:
+Attempting to open your default browser.
+If the browser does not open, open the following URL:
+```
+*   If running outside EC2, re-run `aws sso login --profile <profile-name>` if your SSO session expired.
 *   Check the `AWS_TARGET_ROLE_ARN` in your `.env` file.
 
 **"Model not found" Error:**
