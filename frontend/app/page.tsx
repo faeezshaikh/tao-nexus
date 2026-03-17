@@ -171,6 +171,28 @@ function HomeInner() {
     return `${seconds}s`;
   };
 
+  const formatTableCell = (cell: unknown): string | number => {
+    if (cell === null || cell === undefined) return "";
+    if (typeof cell === "string" || typeof cell === "number") return cell;
+    if (typeof cell === "boolean") return cell ? "Yes" : "No";
+    if (Array.isArray(cell)) {
+      return cell
+        .map((item) => formatTableCell(item))
+        .filter((item) => item !== "")
+        .join(", ");
+    }
+    if (typeof cell === "object") {
+      return Object.entries(cell as Record<string, unknown>)
+        .map(([key, value]) => {
+          const formatted = formatTableCell(value);
+          return formatted === "" ? null : `${key}: ${formatted}`;
+        })
+        .filter(Boolean)
+        .join("; ");
+    }
+    return String(cell);
+  };
+
   async function runQuery() {
     if (!question.trim()) return;
 
@@ -702,7 +724,7 @@ function HomeInner() {
                             key={j}
                             className="px-4 py-3 border-2 border-[#0A0A0A] font-medium"
                           >
-                            {cell as any}
+                            {formatTableCell(cell)}
                           </td>
                         ))}
                       </tr>

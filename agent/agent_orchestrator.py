@@ -11,6 +11,7 @@ Handles the full pipeline:
 7. Generate a human-friendly summary via Ollama
 """
 import asyncio
+import ast
 import logging
 import json
 import math
@@ -655,35 +656,36 @@ class AgentOrchestrator:
         """Format MCP results into chart data structures."""
         charts = []
         intent = intent_data.get("intent", "get_costs")
+        normalized_results = self._normalize_mcp_results(mcp_results)
         
         try:
             # Format 1: GroupedCosts (standard get_cost_and_usage response)
-            if "GroupedCosts" in mcp_results:
-                chart = self._chart_from_grouped_costs(mcp_results["GroupedCosts"], intent_data)
+            if isinstance(normalized_results, dict) and "GroupedCosts" in normalized_results:
+                chart = self._chart_from_grouped_costs(normalized_results["GroupedCosts"], intent_data)
                 if chart:
                     charts.append(chart)
             
             # Format 2: Forecast predictions
-            elif "predictions" in mcp_results:
-                chart = self._chart_from_forecast(mcp_results)
+            elif isinstance(normalized_results, dict) and "predictions" in normalized_results:
+                chart = self._chart_from_forecast(normalized_results)
                 if chart:
                     charts.append(chart)
             
             # Format 3: Comparison data
-            elif "comparison_data" in mcp_results or "GroupedComparisons" in mcp_results:
-                chart = self._chart_from_comparison(mcp_results)
+            elif isinstance(normalized_results, dict) and ("comparison_data" in normalized_results or "GroupedComparisons" in normalized_results):
+                chart = self._chart_from_comparison(normalized_results)
                 if chart:
                     charts.append(chart)
             
             # Format 4: Cost drivers
-            elif "drivers" in mcp_results or "cost_drivers" in mcp_results:
-                chart = self._chart_from_drivers(mcp_results)
+            elif isinstance(normalized_results, dict) and ("drivers" in normalized_results or "cost_drivers" in normalized_results):
+                chart = self._chart_from_drivers(normalized_results)
                 if chart:
                     charts.append(chart)
             
             # Format 5: AWS raw ResultsByTime (legacy / fallback)
-            elif "ResultsByTime" in mcp_results:
-                chart = self._chart_from_results_by_time(mcp_results["ResultsByTime"])
+            elif isinstance(normalized_results, dict) and "ResultsByTime" in normalized_results:
+                chart = self._chart_from_results_by_time(normalized_results["ResultsByTime"])
                 if chart:
                     charts.append(chart)
             
@@ -885,22 +887,27 @@ class AgentOrchestrator:
         
         all_keys = set()
         for item in results_by_time:
-            for group in item.get("Groups", []):
-                key = group.get("Keys", ["Total"])[0]
-                all_keys.add(key)
+            groups = item.get("Groups", [])
+            if groups:
+                for group in groups:
+                    key = group.get("Keys", ["Total"])[0]
+                    all_keys.add(key)
+            elif item.get("Total"):
+                all_keys.add("Total")
         
         datasets = []
         for idx, key in enumerate(sorted(all_keys)):
             data_values = []
             for item in results_by_time:
                 amount = 0.0
-                for group in item.get("Groups", []):
-                    if group.get("Keys", ["Total"])[0] == key:
-                        for metric_name in ["UnblendedCost", "AmortizedCost", "BlendedCost"]:
-                            if metric_name in group.get("Metrics", {}):
-                                amount = self._safe_float(group["Metrics"][metric_name].get("Amount", 0))
-                                break
-                        break
+                groups = item.get("Groups", [])
+                if groups:
+                    for group in groups:
+                        if group.get("Keys", ["Total"])[0] == key:
+                            amount = self._extract_amount_from_metrics(group.get("Metrics", {}))
+                            break
+                elif key == "Total":
+                    amount = self._extract_amount_from_metrics(item.get("Total", {}))
                 data_values.append(round(amount, 2))
             
             datasets.append(ChartDataset(
@@ -924,30 +931,31 @@ class AgentOrchestrator:
         """Format MCP results into table data structures."""
         tables = []
         intent = intent_data.get("intent", "get_costs")
+        normalized_results = self._normalize_mcp_results(mcp_results)
         
         try:
-            if "GroupedCosts" in mcp_results:
-                table = self._table_from_grouped_costs(mcp_results["GroupedCosts"], intent_data)
+            if isinstance(normalized_results, dict) and "GroupedCosts" in normalized_results:
+                table = self._table_from_grouped_costs(normalized_results["GroupedCosts"], intent_data)
                 if table:
                     tables.append(table)
             
-            elif "predictions" in mcp_results:
-                table = self._table_from_forecast(mcp_results)
+            elif isinstance(normalized_results, dict) and "predictions" in normalized_results:
+                table = self._table_from_forecast(normalized_results)
                 if table:
                     tables.append(table)
             
-            elif "comparison_data" in mcp_results or "GroupedComparisons" in mcp_results:
-                table = self._table_from_comparison(mcp_results)
+            elif isinstance(normalized_results, dict) and ("comparison_data" in normalized_results or "GroupedComparisons" in normalized_results):
+                table = self._table_from_comparison(normalized_results)
                 if table:
                     tables.append(table)
             
-            elif "drivers" in mcp_results or "cost_drivers" in mcp_results:
-                table = self._table_from_drivers(mcp_results)
+            elif isinstance(normalized_results, dict) and ("drivers" in normalized_results or "cost_drivers" in normalized_results):
+                table = self._table_from_drivers(normalized_results)
                 if table:
                     tables.append(table)
             
-            elif "ResultsByTime" in mcp_results:
-                table = self._table_from_results_by_time(mcp_results["ResultsByTime"])
+            elif isinstance(normalized_results, dict) and "ResultsByTime" in normalized_results:
+                table = self._table_from_results_by_time(normalized_results["ResultsByTime"])
                 if table:
                     tables.append(table)
             
@@ -958,7 +966,7 @@ class AgentOrchestrator:
                 "get_sp_recommendations", "get_sp_coverage",
                 "get_optimization_recommendations", "get_idle_resources",
             ):
-                table = self._table_from_generic(mcp_results, intent)
+                table = self._table_from_generic(normalized_results, intent)
                 if table:
                     tables.append(table)
                     
@@ -1134,14 +1142,15 @@ class AgentOrchestrator:
         rows = []
         for item in results_by_time:
             period = item.get("TimePeriod", {}).get("Start", "")
-            for group in item.get("Groups", []):
-                service = group.get("Keys", ["Unknown"])[0]
-                amount = 0.0
-                for metric in ["UnblendedCost", "AmortizedCost", "BlendedCost"]:
-                    if metric in group.get("Metrics", {}):
-                        amount = self._safe_float(group["Metrics"][metric].get("Amount", 0))
-                        break
-                rows.append({"Period": period, "Category": service, "Cost (USD)": round(amount, 2)})
+            groups = item.get("Groups", [])
+            if groups:
+                for group in groups:
+                    service = group.get("Keys", ["Unknown"])[0]
+                    amount = self._extract_amount_from_metrics(group.get("Metrics", {}))
+                    rows.append({"Period": period, "Category": service, "Cost (USD)": round(amount, 2)})
+            elif item.get("Total"):
+                amount = self._extract_amount_from_metrics(item.get("Total", {}))
+                rows.append({"Period": period, "Category": "Total", "Cost (USD)": round(amount, 2)})
         
         if not rows:
             return None
@@ -1439,10 +1448,50 @@ class AgentOrchestrator:
         
         rows = []
         for row_dict in table.rows:
-            row_values = [row_dict.get(col, "") for col in columns]
+            row_values = [self._serialize_table_cell(row_dict.get(col, "")) for col in columns]
             rows.append(row_values)
         
         return FinopsTableData(columns=columns, rows=rows)
+
+    def _normalize_mcp_results(self, mcp_results: Any) -> Any:
+        """Find a nested payload matching a known MCP response shape."""
+        mcp_results = self._coerce_structured_payload(mcp_results)
+        mcp_results = self._unwrap_mcp_storage_response(mcp_results)
+        if not isinstance(mcp_results, (dict, list)):
+            return mcp_results
+
+        queue = [mcp_results]
+        seen = set()
+
+        while queue:
+            current = queue.pop(0)
+            current_id = id(current)
+            if current_id in seen:
+                continue
+            seen.add(current_id)
+
+            if isinstance(current, dict):
+                if any(
+                    key in current
+                    for key in (
+                        "GroupedCosts",
+                        "predictions",
+                        "comparison_data",
+                        "GroupedComparisons",
+                        "drivers",
+                        "cost_drivers",
+                        "ResultsByTime",
+                        "ForecastResultsByTime",
+                    )
+                ):
+                    return current
+                queue.extend(value for value in current.values() if isinstance(value, (dict, list)))
+            elif isinstance(current, list):
+                if current and all(isinstance(item, dict) and "TimePeriod" in item for item in current):
+                    return {"ResultsByTime": current}
+                queue.extend(value for value in current if isinstance(value, (dict, list)))
+
+        return mcp_results
 
     # ================================================================ #
     #  Utilities                                                        #
@@ -1457,6 +1506,106 @@ class AgentOrchestrator:
             return val
         except (TypeError, ValueError):
             return 0.0
+
+    def _extract_amount_from_metrics(self, metrics: Dict[str, Any]) -> float:
+        """Extract the first supported cost metric amount from an AWS metrics object."""
+        for metric_name in ["UnblendedCost", "AmortizedCost", "BlendedCost"]:
+            if metric_name in metrics:
+                metric_value = metrics.get(metric_name, {})
+                if isinstance(metric_value, dict):
+                    return self._safe_float(metric_value.get("Amount", 0))
+                return self._safe_float(metric_value)
+        return 0.0
+
+    def _coerce_structured_payload(self, value: Any) -> Any:
+        """Try to parse string payloads into dict/list structures."""
+        if not isinstance(value, str):
+            return value
+
+        text = value.strip()
+        if not text:
+            return value
+
+        if text.startswith("```"):
+            text = text.strip("`")
+            if "\n" in text:
+                text = text.split("\n", 1)[1]
+            text = text.strip()
+
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(text)
+                if isinstance(parsed, (dict, list)):
+                    return parsed
+            except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+                pass
+
+        for start_char, end_char in (("{", "}"), ("[", "]")):
+            start_idx = text.find(start_char)
+            end_idx = text.rfind(end_char)
+            if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
+                continue
+            candidate = text[start_idx:end_idx + 1]
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(candidate)
+                    if isinstance(parsed, (dict, list)):
+                        return parsed
+                except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
+                    continue
+
+        return value
+
+    def _unwrap_mcp_storage_response(self, value: Any) -> Any:
+        """Unwrap billing-cost-management MCP 'stored table' responses into a normal dict."""
+        if not isinstance(value, dict):
+            return value
+
+        data = value.get("data")
+        if not isinstance(data, dict):
+            return value
+
+        preview = data.get("preview")
+        if not isinstance(preview, list):
+            return value
+
+        rows = [row for row in preview if isinstance(row, dict) and "key" in row and "value" in row]
+        if not rows:
+            return value
+
+        unwrapped: Dict[str, Any] = {}
+        for row in rows:
+            key = row.get("key")
+            if not isinstance(key, str):
+                continue
+            unwrapped[key] = self._coerce_structured_payload(row.get("value"))
+
+        for passthrough_key in ("start_date", "end_date", "granularity", "metrics", "group_by"):
+            if passthrough_key in data and passthrough_key not in unwrapped:
+                unwrapped[passthrough_key] = self._coerce_structured_payload(data[passthrough_key])
+
+        return unwrapped or value
+
+    def _serialize_table_cell(self, value: Any) -> Any:
+        """Normalize table cells to frontend-friendly primitives."""
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            return round(value, 2)
+        if isinstance(value, (int, str, bool)):
+            return value
+        if isinstance(value, list):
+            flattened = [self._serialize_table_cell(item) for item in value]
+            return ", ".join(str(item) for item in flattened if item not in ("", None))
+        if isinstance(value, dict):
+            simple_parts = []
+            for key, item in value.items():
+                normalized = self._serialize_table_cell(item)
+                if normalized in ("", None):
+                    continue
+                simple_parts.append(f"{key}: {normalized}")
+            return "; ".join(simple_parts) if simple_parts else json.dumps(value, default=str)[:200]
+        return str(value)
 
     def _get_color(self, index: int) -> str:
         """Get color for chart dataset."""

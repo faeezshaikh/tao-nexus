@@ -32,14 +32,34 @@ def _parse_mcp_result(result) -> Any:
     if not result or not result.content:
         return {}
     
-    text = result.content[0].text
+    text_parts = []
+    for item in result.content:
+        text = getattr(item, "text", None)
+        if text:
+            text_parts.append(text)
+
+    text = "\n".join(text_parts).strip()
     if not text:
         return {}
     
     try:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
-        return text
+        pass
+
+    # Some MCP tools return explanatory text before/after the JSON payload.
+    for start_char, end_char in (("{", "}"), ("[", "]")):
+        start_idx = text.find(start_char)
+        end_idx = text.rfind(end_char)
+        if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
+            continue
+        candidate = text[start_idx:end_idx + 1]
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    return text
 
 
 class MCPClient:
