@@ -393,11 +393,11 @@ function HomeInner() {
       <div className="max-w-6xl mx-auto relative z-10">
         {/* User Info & Logout */}
         <div className="flex justify-end mb-4 gap-3">
-          <Link href="/nexus">
+          {/* <Link href="/nexus">
             <button className="bg-[#FFE500] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-5 py-2 font-bold text-sm tracking-wide hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
               🚀 TRY TAO NEXUS
             </button>
-          </Link>
+          </Link> */}
           <Link href="/history">
             <button className="bg-[#B794F6] border-4 border-[#0A0A0A] shadow-[6px_6px_0px_#0A0A0A] px-4 py-2 font-bold text-sm hover:shadow-[8px_8px_0px_#0A0A0A] hover:-translate-y-0.5 transition-all active:shadow-[4px_4px_0px_#0A0A0A] active:translate-y-0">
               🕘 HISTORY
