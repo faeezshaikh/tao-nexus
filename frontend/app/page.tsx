@@ -38,23 +38,22 @@ const PROMPT_CATALOG = [
     prompts: [
       "What were my total AWS costs last month?",
       "Show EC2 costs by region for the last full month",
-      "Break down S3 costs for the last 6 months",
+      "Break down AWS costs by service for the current month",
     ],
   },
   {
     category: "Forecasting",
     prompts: [
       "Forecast total AWS costs for next month",
-      "What will my S3 costs be next month?",
-      "Predict EC2 spending for the next quarter",
+      "Forecast total AWS costs for the next quarter",
     ],
   },
   {
     category: "Resource Utilization",
     prompts: [
-      "Show RDS costs grouped by instance type",
+      "Break down EC2 costs by instance type for last month",
       "Show Lambda costs for last 7 days",
-      "Compare data transfer costs across regions",
+      "Show RDS costs grouped by database engine",
     ],
   },
   {
@@ -69,15 +68,15 @@ const PROMPT_CATALOG = [
     category: "Anomaly Detection",
     prompts: [
       "Were there any cost anomalies in the last 30 days?",
-      "What caused the unusual spending spike?",
       "Why did my AWS bill increase last month?",
+      "What were the top cost change drivers last month?",
     ],
   },
   {
     category: "Budget Monitoring",
     prompts: [
       "Am I on track with my AWS budgets?",
-      "Show my budget status and alerts",
+      "Show my AWS budgets",
       "Which budgets are close to their limit?",
     ],
   },
@@ -86,14 +85,14 @@ const PROMPT_CATALOG = [
     prompts: [
       "Am I about to exceed any free tier limits?",
       "Show free tier usage across all services",
-      "Which services are closest to free tier caps?",
     ],
   },
   {
     category: "Savings Plans & RIs",
     prompts: [
-      "What Savings Plans should I purchase?",
       "Show my Reserved Instance coverage",
+      "Should I buy Reserved Instances for EC2?",
+      "What Savings Plans should I purchase?",
       "What's my Savings Plans coverage percentage?",
     ],
   },
